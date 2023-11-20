@@ -6,7 +6,7 @@ use std::io;
 
 use clap::{ArgMatches, Command};
 
-use client::{Client, PacketId};
+use client::{Client, RequestSpec};
 use ipc::IpcClient;
 
 fn cli() -> Command {
@@ -16,18 +16,6 @@ fn cli() -> Command {
         .arg_required_else_help(true)
         .allow_external_subcommands(true)
         .subcommand(Command::new("ping").about("Ping"))
-}
-
-pub trait RequestSpec: prost::Message {
-    const PACKET_ID: PacketId;
-
-    type RESPONSE: prost::Message + Default;
-}
-
-impl RequestSpec for proto::PingRequest {
-    const PACKET_ID: PacketId = PacketId::Ping;
-
-    type RESPONSE = proto::PingResponse;
 }
 
 pub fn send_request<T: RequestSpec>(msg: T) -> io::Result<T::RESPONSE> {
@@ -47,6 +35,76 @@ fn run(matches: ArgMatches) -> io::Result<()> {
             } else {
                 println!("Ping failed! Wrong response challenge.");
             }
+        }
+        Some(("clear", _)) => {
+            send_request(proto::ClearStorageRequest {})?;
+            println!("Done!");
+        }
+        Some(("setcfg", _)) => {
+            send_request(proto::SetConfigurationRequest {
+                configuration: Some(proto::Configuration {
+                    stack_trace_offset: 0x10,
+                    stack_trace_size: 5,
+                }),
+            })?;
+            println!("Done!");
+        }
+        Some(("getcfg", _)) => {
+            let resp = send_request(proto::GetConfigurationRequest {})?;
+            println!("Configuration: {:#?}", resp.configuration);
+        }
+        Some(("dump", _)) => {
+            let resp = send_request(proto::FindRequest {
+                records: vec![proto::FindRecord {
+                    id: 0,
+                    filter: None,
+                }],
+            })?;
+            assert_eq!(resp.allocations.len(), 1);
+
+            let allocations = &resp.allocations.first().unwrap().allocations;
+
+            for allocation in allocations {
+                println!(
+                    "Allocation: [base=0x{:X}, size=0x{:X}]",
+                    allocation.base_address, allocation.size
+                );
+            }
+        }
+        Some(("find", _)) => {
+            let resp = send_request(proto::FindRequest {
+                records: vec![proto::FindRecord {
+                    id: 0,
+                    filter: Some(proto::Filter {
+                        location: Some(proto::filter::Location::Address(0x100)),
+                    }),
+                }],
+            })?;
+
+            let total_allocations = resp
+                .allocations
+                .iter()
+                .fold(0, |acc, x| acc + x.allocations.len());
+            println!("Found {} allocations.", total_allocations);
+        }
+        Some(("findrange", _)) => {
+            let resp = send_request(proto::FindRequest {
+                records: vec![proto::FindRecord {
+                    id: 0,
+                    filter: Some(proto::Filter {
+                        location: Some(proto::filter::Location::Range(proto::Range {
+                            lower: 0x10000,
+                            upper: 0x100000,
+                        })),
+                    }),
+                }],
+            })?;
+
+            let total_allocations = resp
+                .allocations
+                .iter()
+                .fold(0, |acc, x| acc + x.allocations.len());
+            println!("Found {} allocations.", total_allocations);
         }
         Some((cmd, _)) => panic!("Unhandled command: {}", cmd),
         None => panic!("How to handle None?"), // TODO: handle

@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::ipc::IpcClient;
+use crate::{ipc::IpcClient, proto};
 
 pub mod sealed {
     include!("../../common/packet_id.rs");
@@ -8,6 +8,42 @@ pub mod sealed {
 
 use bytes::{BufMut, Bytes, BytesMut};
 pub use sealed::PacketId;
+
+pub trait RequestSpec: prost::Message {
+    const PACKET_ID: PacketId;
+
+    type RESPONSE: prost::Message + Default;
+}
+
+impl RequestSpec for proto::PingRequest {
+    const PACKET_ID: PacketId = PacketId::Ping;
+
+    type RESPONSE = proto::PingResponse;
+}
+
+impl RequestSpec for proto::SetConfigurationRequest {
+    const PACKET_ID: PacketId = PacketId::SetConfiguration;
+
+    type RESPONSE = proto::SetConfigurationResponse;
+}
+
+impl RequestSpec for proto::GetConfigurationRequest {
+    const PACKET_ID: PacketId = PacketId::GetConfiguration;
+
+    type RESPONSE = proto::GetConfigurationResponse;
+}
+
+impl RequestSpec for proto::ClearStorageRequest {
+    const PACKET_ID: PacketId = PacketId::ClearStorage;
+
+    type RESPONSE = proto::ClearStorageResponse;
+}
+
+impl RequestSpec for proto::FindRequest {
+    const PACKET_ID: PacketId = PacketId::Find;
+
+    type RESPONSE = proto::FindResponse;
+}
 
 pub struct Client {
     ipc_client: IpcClient,

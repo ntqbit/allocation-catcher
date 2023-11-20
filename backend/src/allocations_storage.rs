@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::ops::Bound::{Excluded, Included};
 
+use crate::proto;
+
 pub type Address = usize;
 pub type HeapHandle = usize;
 
@@ -15,6 +17,16 @@ pub struct Allocation {
     pub call_stack: CallStack,
 }
 
+impl From<&Allocation> for proto::Allocation {
+    fn from(value: &Allocation) -> Self {
+        Self {
+            base_address: value.base_address as u64,
+            size: value.size as u64,
+            // TODO: complete
+        }
+    }
+}
+
 pub trait AllocationsStorage: Sync + Send {
     fn store(&mut self, allocation: Allocation);
 
@@ -27,6 +39,10 @@ pub trait AllocationsStorage: Sync + Send {
         lower: Address,
         upper: Address,
     ) -> Box<dyn Iterator<Item = &Allocation> + 'a>;
+
+    fn dump<'a>(&'a self) -> Box<dyn Iterator<Item = &Allocation> + 'a>;
+
+    fn clear(&mut self);
 }
 
 pub struct StorageImpl {
@@ -64,5 +80,13 @@ impl AllocationsStorage for StorageImpl {
                 .range((Included(lower), Excluded(upper)))
                 .map(|(_, k)| k),
         )
+    }
+
+    fn dump<'a>(&'a self) -> Box<dyn Iterator<Item = &Allocation> + 'a> {
+        Box::new(self.map.iter().map(|(_, k)| k))
+    }
+
+    fn clear(&mut self) {
+        self.map.clear();
     }
 }

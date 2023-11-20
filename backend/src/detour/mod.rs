@@ -9,7 +9,6 @@ pub enum Error {
     HookInitializeFailed,
     HookEnableFailed,
     HookDisableFailed,
-    TlsError,
 }
 
 pub type HeapHandle = usize;

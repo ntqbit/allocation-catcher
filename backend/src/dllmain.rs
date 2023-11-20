@@ -1,17 +1,14 @@
-use std::{
-    ffi::CString,
-    io,
-    sync::{Arc, Mutex},
-};
+use std::{ffi::CString, io, iter};
 
 use crate::{
     allocation_handler::AllocationHandlerImpl,
-    allocations_storage::{AllocationsStorage, StorageImpl},
+    allocations_storage::{Address, Allocation, StorageImpl},
     debug::debug_message,
     detour,
-    ipc::{IpcServer, RequestHandler},
+    ipc::{self, RequestHandler},
     proto,
-    server::{PacketId, Server},
+    server::PacketId,
+    state::{Configuration, State, StateRef},
 };
 use bytes::{Bytes, BytesMut};
 use num_enum::TryFromPrimitive;
@@ -25,30 +22,55 @@ use winapi::{
     },
 };
 
-pub struct MyRequestHandler<T: Server> {
-    server: Box<T>,
+pub struct MyServer {
+    state: StateRef,
 }
 
-impl<T: Server> MyRequestHandler<T> {
-    pub const fn new(server: Box<T>) -> Self {
-        Self { server }
-    }
-}
-
-impl<T: Server> RequestHandler for MyRequestHandler<T> {
+impl RequestHandler for MyServer {
     fn handle_request(&self, mut packet: Bytes) -> io::Result<Bytes> {
         let packet_id_num = packet[0];
         let packet_id = PacketId::try_from_primitive(packet_id_num)
             .map_err(|_| io::Error::from(io::ErrorKind::ConnectionReset))?;
-        self.server.request(packet_id, packet.split_off(1))
+        self.request_inner(packet_id, packet.split_off(1))
+            .ok_or_else(|| io::Error::from(io::ErrorKind::ConnectionReset))
     }
 }
 
-pub struct MyServer {}
-
 impl MyServer {
-    pub const fn new() -> Self {
-        Self {}
+    pub const fn new(state: StateRef) -> Self {
+        Self { state }
+    }
+
+    fn handle_find(&self, req: proto::FindRequest) -> Vec<proto::FoundAllocation> {
+        let _ack = self.state.acquire_all();
+        let storage = self.state.get_storage();
+
+        let find_record = |record: &proto::FindRecord| {
+            let allocations = if let Some(filter) = record.filter.as_ref() {
+                let location = filter.location.as_ref().expect("location must be set");
+                match location {
+                    proto::filter::Location::Address(address) => {
+                        if let Some(allocation) = storage.find(*address as Address) {
+                            Box::new(iter::once(allocation))
+                        } else {
+                            Box::new(iter::empty()) as Box<dyn Iterator<Item = &Allocation>>
+                        }
+                    }
+                    proto::filter::Location::Range(range) => {
+                        storage.find_range(range.lower as Address, range.upper as Address)
+                    }
+                }
+            } else {
+                storage.dump()
+            };
+
+            proto::FoundAllocation {
+                id: record.id,
+                allocations: allocations.map(|x| x.into()).collect(),
+            }
+        };
+
+        req.records.iter().map(find_record).collect()
     }
 
     fn request_inner(&self, packet_id: PacketId, data: Bytes) -> Option<Bytes> {
@@ -56,23 +78,55 @@ impl MyServer {
 
         match packet_id {
             PacketId::Ping => {
-                let ping_request = proto::PingRequest::decode(data).ok()?;
-                let ping_response = proto::PingResponse {
+                let req = proto::PingRequest::decode(data).ok()?;
+
+                proto::PingResponse {
                     version: 1,
-                    num: ping_request.num,
-                };
-                ping_response.encode(&mut response).ok()?;
+                    num: req.num,
+                }
+                .encode(&mut response)
+                .ok()?;
+            }
+            PacketId::SetConfiguration => {
+                let req = proto::SetConfigurationRequest::decode(data).ok()?;
+
+                self.state.set_configuration(req.configuration?.into());
+
+                proto::SetConfigurationResponse {}
+                    .encode(&mut response)
+                    .ok()?;
+            }
+            PacketId::GetConfiguration => {
+                let _req = proto::GetConfigurationRequest::decode(data).ok()?;
+
+                proto::GetConfigurationResponse {
+                    configuration: Some(self.state.get_configuration().into()),
+                }
+                .encode(&mut response)
+                .ok()?;
+            }
+            PacketId::ClearStorage => {
+                let _req = proto::ClearStorageRequest::decode(data).ok()?;
+
+                {
+                    let _a = self.state.acquire_all();
+                    self.state.get_storage().clear();
+                }
+
+                proto::ClearStorageResponse {}.encode(&mut response).ok()?;
+            }
+            PacketId::Find => {
+                let req = proto::FindRequest::decode(data).ok()?;
+
+                proto::FindResponse {
+                    allocations: self.handle_find(req),
+                }
+                .encode(&mut response)
+                .ok()?;
             }
         }
 
         Some(response.freeze())
-    }
-}
-
-impl Server for MyServer {
-    fn request(&self, packet_id: PacketId, data: Bytes) -> io::Result<Bytes> {
-        self.request_inner(packet_id, data)
-            .ok_or_else(|| io::Error::from(io::ErrorKind::ConnectionReset))
     }
 }
 
@@ -95,33 +149,36 @@ fn initialize_panic_handler() {
     }));
 }
 
-fn initialize_detour(storage: Arc<Mutex<dyn AllocationsStorage>>) {
+fn initialize_detour(state: StateRef) {
     unsafe {
-        detour::set_allocation_handler(make_static!(AllocationHandlerImpl::new(storage)));
+        detour::set_allocation_handler(make_static!(AllocationHandlerImpl::new(state)));
 
-        debug_message("set_allocation_handler done");
+        debug_message!("set_allocation_handler done");
 
         detour::initialize().expect("detour initialize failed");
-        debug_message("detour initialized");
+        debug_message!("detour initialized");
 
         detour::enable().expect("detour enable failed");
-        debug_message("detour enabled");
+        debug_message!("detour enabled");
     }
 }
 
 fn initialize() {
-    debug_message("Initialize");
     initialize_panic_handler();
 
-    let storage = Arc::new(Mutex::new(StorageImpl::new()));
-    debug_message("Storage created");
+    debug_message!("Initialize");
 
-    initialize_detour(storage.clone());
-    debug_message("Detour initialized");
-    debug_message("test initialized");
+    let state = make_static!(State::new(
+        Configuration::default(),
+        Box::new(StorageImpl::new())
+    ));
 
-    let ipc_server = IpcServer::new(Arc::new(MyRequestHandler::new(Box::new(MyServer::new()))));
-    std::thread::spawn(|| ipc_server.serve());
+    initialize_detour(state);
+    debug_message!("Detour initialized");
+
+    let server = make_static!(MyServer::new(state));
+
+    std::thread::spawn(|| ipc::serve_ipc("allocation-catcher", server));
 }
 
 fn deinitialize() {

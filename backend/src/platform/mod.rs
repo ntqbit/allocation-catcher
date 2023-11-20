@@ -6,25 +6,25 @@ pub struct TlsSlotAcquisition {
     tls_key: TlsKey<usize>,
 }
 
+// Assumes initial value of a TLS slot to be 0.
 impl TlsSlotAcquisition {
     pub unsafe fn new() -> Option<Self> {
-        let tls_key = TlsKey::new().ok()?;
-        tls_key.set(0);
-
-        Some(Self { tls_key })
+        Some(Self {
+            tls_key: TlsKey::new().ok()?,
+        })
     }
 
-    pub unsafe fn acquire(&self, slot: usize) -> bool {
-        let val = self.tls_key.get();
-        if val & (1 << slot) != 0 {
-            false
-        } else {
-            self.tls_key.set(val | (1 << slot));
-            true
-        }
+    pub unsafe fn get(&self) -> usize {
+        self.tls_key.get()
     }
 
-    pub unsafe fn release(&self, slot: usize) {
-        self.tls_key.set(self.tls_key.get() & !(1 << slot));
+    pub unsafe fn acquire(&self, acquisition: usize) -> usize {
+        let val = self.get();
+        self.tls_key.set(val | acquisition);
+        !val & acquisition
+    }
+
+    pub unsafe fn release(&self, acquisition: usize) {
+        self.tls_key.set(self.get() & !acquisition)
     }
 }

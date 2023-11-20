@@ -10,3 +10,67 @@ message PingResponse {
   uint32 version = 1;
   int32 num = 2;
 }
+
+message Configuration {
+  uint64 stack_trace_offset = 1;
+  uint64 stack_trace_size = 2;
+}
+
+message SetConfigurationRequest {
+  Configuration configuration = 1;
+}
+
+message SetConfigurationResponse {
+
+}
+
+message GetConfigurationRequest {
+
+}
+
+message GetConfigurationResponse {
+  Configuration configuration = 1; 
+}
+
+message ClearStorageRequest {
+
+}
+
+message ClearStorageResponse {
+
+}
+
+message Range {
+  uint64 lower = 1;
+  uint64 upper = 2;
+}
+
+message Filter {
+  oneof location {
+    uint64 address = 1;
+    Range range = 2;
+  }
+}
+
+message FindRecord {
+  uint32 id = 1;
+  Filter filter = 2;
+}
+
+message FindRequest {
+  repeated FindRecord records = 1;
+}
+
+message Allocation {
+  uint64 base_address = 1;
+  uint64 size = 2;
+}
+
+message FoundAllocation {
+  uint32 id = 1;
+  repeated Allocation allocations = 2;
+}
+
+message FindResponse {
+  repeated FoundAllocation allocations = 1;
+}

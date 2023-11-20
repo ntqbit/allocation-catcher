@@ -8,6 +8,7 @@ crate-type=["cdylib"]
 
 [dependencies]
 bytes = "1.5.0"
+heapless = "0.8.0"
 interprocess = "1.2.1"
 num_enum = "0.7.1"
 prost = "0.12.2"

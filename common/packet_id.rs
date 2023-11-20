@@ -4,4 +4,8 @@ use num_enum::TryFromPrimitive;
 #[repr(u8)]
 pub enum PacketId {
     Ping = 1,
+    SetConfiguration = 2,
+    GetConfiguration = 3,
+    ClearStorage = 4,
+    Find = 5,
 }

@@ -4,10 +4,11 @@
 
 mod allocation_handler;
 mod allocations_storage;
+mod debug;
 mod detour;
 mod dllmain;
 mod ipc;
-mod server;
-mod proto;
-mod debug;
 mod platform;
+mod proto;
+mod server;
+mod state;

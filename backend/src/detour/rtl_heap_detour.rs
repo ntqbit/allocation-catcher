@@ -10,18 +10,16 @@ use winapi::{
     um::libloaderapi::{GetProcAddress, LoadLibraryA},
 };
 
-use crate::platform::TlsSlotAcquisition;
-
 use super::{allocation_handler, Allocation, Deallocation, Error};
 
 static_detour! {
-    static RtlAllocateHeapHook: extern "stdcall" fn(
+    static RtlAllocateHeapHook: extern "system" fn(
         PVOID,
         ULONG,
         SIZE_T
       ) -> PVOID;
 
-    static RtlFreeHeapHook: extern "stdcall" fn(
+    static RtlFreeHeapHook: extern "system" fn(
         PVOID,
         ULONG,
         PVOID
@@ -29,50 +27,20 @@ static_detour! {
 }
 
 static mut INITIAILIZED: AtomicBool = AtomicBool::new(false);
-static mut TLS_SLOT_ACQUISITION: Option<TlsSlotAcquisition> = None;
-
-#[repr(usize)]
-enum Slot {
-    Alloc = 0,
-    Free = 1,
-}
-
-fn acquire_slot(slot: Slot) -> bool {
-    // SAFETY: initialized when detour is initialized
-    unsafe {
-        TLS_SLOT_ACQUISITION
-            .as_ref()
-            .unwrap()
-            .acquire(slot as usize)
-    }
-}
-
-fn release_slot(slot: Slot) {
-    // SAFETY: initialized when detour is initialized
-    unsafe {
-        TLS_SLOT_ACQUISITION
-            .as_ref()
-            .unwrap()
-            .release(slot as usize)
-    }
-}
 
 #[allow(non_snake_case)]
 fn RtlAllocateHeapDetour(HeapHandle: PVOID, Flags: ULONG, Size: SIZE_T) -> PVOID {
     let base_address = RtlAllocateHeapHook.call(HeapHandle, Flags, Size);
 
-    if acquire_slot(Slot::Alloc) {
-        unsafe { allocation_handler() }.on_allocation(Allocation {
-            heap_handle: HeapHandle as usize,
-            size: Size as usize,
-            allocated_base_address: if base_address.is_null() {
-                None
-            } else {
-                Some(base_address as usize)
-            },
-        });
-        release_slot(Slot::Alloc);
-    }
+    unsafe { allocation_handler() }.on_allocation(Allocation {
+        heap_handle: HeapHandle as usize,
+        size: Size as usize,
+        allocated_base_address: if base_address.is_null() {
+            None
+        } else {
+            Some(base_address as usize)
+        },
+    });
 
     base_address
 }
@@ -81,14 +49,11 @@ fn RtlAllocateHeapDetour(HeapHandle: PVOID, Flags: ULONG, Size: SIZE_T) -> PVOID
 fn RtlFreeHeapDetour(HeapHandle: PVOID, Flags: ULONG, BaseAddress: PVOID) -> BOOL {
     let success = RtlFreeHeapHook.call(HeapHandle, Flags, BaseAddress);
 
-    if acquire_slot(Slot::Free) {
-        unsafe { allocation_handler() }.on_deallocation(Deallocation {
-            heap_handle: HeapHandle as usize,
-            base_address: BaseAddress as usize,
-            success: success != 0,
-        });
-        release_slot(Slot::Free);
-    }
+    unsafe { allocation_handler() }.on_deallocation(Deallocation {
+        heap_handle: HeapHandle as usize,
+        base_address: BaseAddress as usize,
+        success: success != 0,
+    });
 
     success
 }
@@ -101,15 +66,8 @@ pub fn is_enabled() -> bool {
     RtlAllocateHeapHook.is_enabled()
 }
 
-pub unsafe fn initialize_tls() -> Result<(), Error> {
-    TLS_SLOT_ACQUISITION = Some(TlsSlotAcquisition::new().ok_or(Error::TlsError)?);
-    Ok(())
-}
-
 #[allow(non_snake_case)]
 pub unsafe fn initialize() -> Result<(), Error> {
-    initialize_tls()?;
-
     // Find ntdll
     let ntdll_module = LoadLibraryA(b"ntdll.dll\0".as_ptr() as _);
     if ntdll_module.is_null() {
