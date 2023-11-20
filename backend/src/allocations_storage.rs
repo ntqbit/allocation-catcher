@@ -75,11 +75,15 @@ impl AllocationsStorage for StorageImpl {
         lower: Address,
         upper: Address,
     ) -> Box<dyn Iterator<Item = &Allocation> + 'a> {
-        Box::new(
-            self.map
-                .range((Included(lower), Excluded(upper)))
-                .map(|(_, k)| k),
-        )
+        if lower > upper {
+            Box::new(core::iter::empty())
+        } else {
+            Box::new(
+                self.map
+                    .range((Included(lower), Excluded(upper)))
+                    .map(|(_, k)| k),
+            )
+        }
     }
 
     fn dump<'a>(&'a self) -> Box<dyn Iterator<Item = &Allocation> + 'a> {
