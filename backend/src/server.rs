@@ -1,3 +1,5 @@
+use std::io;
+
 use bytes::Bytes;
 
 pub mod sealed {
@@ -7,5 +9,5 @@ pub mod sealed {
 pub use sealed::PacketId;
 
 pub trait Server: Send + Sync {
-    fn request(&self, packet_id: PacketId, data: Bytes) -> Bytes;
+    fn request(&self, packet_id: PacketId, data: Bytes) -> io::Result<Bytes>;
 }

@@ -1,5 +1,6 @@
 use std::{
     ffi::CString,
+    io,
     sync::{Arc, Mutex},
 };
 
@@ -35,11 +36,10 @@ impl<T: Server> MyRequestHandler<T> {
 }
 
 impl<T: Server> RequestHandler for MyRequestHandler<T> {
-    fn handle_request(&self, mut packet: Bytes) -> Bytes {
+    fn handle_request(&self, mut packet: Bytes) -> io::Result<Bytes> {
         let packet_id_num = packet[0];
-        // TODO: handle error
-        let packet_id = PacketId::try_from_primitive(packet_id_num).unwrap();
-
+        let packet_id = PacketId::try_from_primitive(packet_id_num)
+            .map_err(|_| io::Error::from(io::ErrorKind::ConnectionReset))?;
         self.server.request(packet_id, packet.split_off(1))
     }
 }
@@ -50,25 +50,49 @@ impl MyServer {
     pub const fn new() -> Self {
         Self {}
     }
-}
 
-impl Server for MyServer {
-    fn request(&self, packet_id: PacketId, data: Bytes) -> Bytes {
+    fn request_inner(&self, packet_id: PacketId, data: Bytes) -> Option<Bytes> {
         let mut response = BytesMut::new();
 
         match packet_id {
             PacketId::Ping => {
-                let ping_request = proto::PingRequest::decode(data).unwrap();
+                let ping_request = proto::PingRequest::decode(data).ok()?;
                 let ping_response = proto::PingResponse {
                     version: 1,
                     num: ping_request.num,
                 };
-                ping_response.encode(&mut response).unwrap();
+                ping_response.encode(&mut response).ok()?;
             }
         }
 
-        response.freeze()
+        Some(response.freeze())
     }
+}
+
+impl Server for MyServer {
+    fn request(&self, packet_id: PacketId, data: Bytes) -> io::Result<Bytes> {
+        self.request_inner(packet_id, data)
+            .ok_or_else(|| io::Error::from(io::ErrorKind::ConnectionReset))
+    }
+}
+
+fn initialize_panic_handler() {
+    std::panic::set_hook(Box::new(|panic_info| {
+        if let Ok(cstring) = CString::new(panic_info.to_string()) {
+            unsafe {
+                MessageBoxA(0 as _, cstring.as_ptr() as _, b"PANIC\0".as_ptr() as _, 0);
+            }
+        } else {
+            unsafe {
+                MessageBoxA(
+                    0 as _,
+                    b"panic info contained a nul byte\0".as_ptr() as _,
+                    b"PANIC\0".as_ptr() as _,
+                    0,
+                );
+            }
+        }
+    }));
 }
 
 fn initialize_detour(storage: Arc<Mutex<dyn AllocationsStorage>>) {
@@ -76,44 +100,34 @@ fn initialize_detour(storage: Arc<Mutex<dyn AllocationsStorage>>) {
         detour::set_allocation_handler(make_static!(AllocationHandlerImpl::new(storage)));
 
         debug_message("set_allocation_handler done");
-        // TODO: remove unwrap
-        detour::initialize().unwrap();
+
+        detour::initialize().expect("detour initialize failed");
         debug_message("detour initialized");
 
-        detour::enable().unwrap();
+        detour::enable().expect("detour enable failed");
         debug_message("detour enabled");
     }
 }
 
 fn initialize() {
     debug_message("Initialize");
+    initialize_panic_handler();
 
     let storage = Arc::new(Mutex::new(StorageImpl::new()));
     debug_message("Storage created");
-
-    std::panic::set_hook(Box::new(|panic_info| {
-        let cstring = CString::new(panic_info.to_string()).unwrap();
-        unsafe {
-            MessageBoxA(0 as _, cstring.as_ptr() as _, b"PANIC\0".as_ptr() as _, 0);
-        }
-    }));
 
     initialize_detour(storage.clone());
     debug_message("Detour initialized");
     debug_message("test initialized");
 
     let ipc_server = IpcServer::new(Arc::new(MyRequestHandler::new(Box::new(MyServer::new()))));
-
-    debug_message("IPC server created");
-
     std::thread::spawn(|| ipc_server.serve());
 }
 
 fn deinitialize() {
     unsafe {
-        // TODO: remove unwrap
-        detour::disable().unwrap();
-        detour::uninitialize().unwrap();
+        detour::disable().expect("detour disable failed");
+        detour::uninitialize().expect("detour uninitialize failed");
     }
 }
 

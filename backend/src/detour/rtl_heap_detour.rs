@@ -29,7 +29,7 @@ static_detour! {
 }
 
 static mut INITIAILIZED: AtomicBool = AtomicBool::new(false);
-static mut RECURSION_STATE: Option<TlsSlotAcquisition> = None;
+static mut TLS_SLOT_ACQUISITION: Option<TlsSlotAcquisition> = None;
 
 #[repr(usize)]
 enum Slot {
@@ -38,11 +38,23 @@ enum Slot {
 }
 
 fn acquire_slot(slot: Slot) -> bool {
-    unsafe { RECURSION_STATE.as_ref().unwrap().acquire(slot as usize) }
+    // SAFETY: initialized when detour is initialized
+    unsafe {
+        TLS_SLOT_ACQUISITION
+            .as_ref()
+            .unwrap()
+            .acquire(slot as usize)
+    }
 }
 
 fn release_slot(slot: Slot) {
-    unsafe { RECURSION_STATE.as_ref().unwrap().release(slot as usize) }
+    // SAFETY: initialized when detour is initialized
+    unsafe {
+        TLS_SLOT_ACQUISITION
+            .as_ref()
+            .unwrap()
+            .release(slot as usize)
+    }
 }
 
 #[allow(non_snake_case)]
@@ -90,7 +102,7 @@ pub fn is_enabled() -> bool {
 }
 
 pub unsafe fn initialize_tls() -> Result<(), Error> {
-    RECURSION_STATE = Some(TlsSlotAcquisition::new().ok_or(Error::TlsError)?);
+    TLS_SLOT_ACQUISITION = Some(TlsSlotAcquisition::new().ok_or(Error::TlsError)?);
     Ok(())
 }
 

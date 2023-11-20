@@ -1,5 +1,5 @@
 use std::{
-    io::{Read, Write},
+    io::{self, Read, Write},
     sync::Arc,
 };
 
@@ -7,7 +7,7 @@ use bytes::{Bytes, BytesMut};
 use interprocess::local_socket::{LocalSocketListener, LocalSocketStream};
 
 pub trait RequestHandler: Send + Sync {
-    fn handle_request(&self, packet: Bytes) -> Bytes;
+    fn handle_request(&self, packet: Bytes) -> io::Result<Bytes>;
 }
 
 pub struct IpcServer {
@@ -19,13 +19,11 @@ impl IpcServer {
         Self { request_handler }
     }
 
-    pub fn serve(self) {
-        // TODO: remove unwrap
-        let sock = LocalSocketListener::bind("allocation-catcher").unwrap();
+    pub fn serve(self) -> io::Result<()> {
+        let sock = LocalSocketListener::bind("allocation-catcher")?;
 
         loop {
-            // TODO: remove unwrap
-            let stream = sock.accept().unwrap();
+            let stream = sock.accept()?;
             let client = IpcClientServer::new(stream, self.request_handler.clone());
             std::thread::spawn(|| client.serve());
         }
@@ -46,27 +44,27 @@ impl IpcClientServer {
     }
 
     pub fn serve(mut self) {
+        loop {
+            if let Err(_) = self.serve_iteration() {
+                break;
+            }
+        }
+    }
+
+    fn serve_iteration(&mut self) -> io::Result<()> {
         let mut packet_length_buf = [0u8; 2];
 
-        loop {
-            // TODO: remove unwrap
-            self.stream.read_exact(&mut packet_length_buf).unwrap();
+        self.stream.read_exact(&mut packet_length_buf)?;
 
-            let packet_length = u16::from_be_bytes(packet_length_buf) as usize;
-            let mut packet = BytesMut::zeroed(packet_length);
+        let packet_length = u16::from_be_bytes(packet_length_buf) as usize;
+        let mut packet = BytesMut::zeroed(packet_length);
 
-            // TODO: remove unwrap
-            self.stream.read_exact(&mut packet).unwrap();
-            assert!(packet.len() == packet_length);
+        self.stream.read_exact(&mut packet)?;
+        assert!(packet.len() == packet_length);
 
-            let response = self.request_handler.handle_request(packet.freeze());
-
-            // TODO: remove unwrap
-            self.stream
-                .write(&(response.len() as u16).to_be_bytes())
-                .unwrap();
-            // TODO: remove unwrap
-            self.stream.write(response.as_ref()).unwrap();
-        }
+        let response = self.request_handler.handle_request(packet.freeze())?;
+        self.stream.write(&(response.len() as u16).to_be_bytes())?;
+        self.stream.write(response.as_ref())?;
+        Ok(())
     }
 }

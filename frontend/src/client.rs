@@ -1,3 +1,5 @@
+use std::io;
+
 use crate::ipc::IpcClient;
 
 pub mod sealed {
@@ -16,11 +18,10 @@ impl Client {
         Self { ipc_client }
     }
 
-    pub fn request(&mut self, packet_id: PacketId, data: Bytes) -> Bytes {
+    pub fn request(&mut self, packet_id: PacketId, data: Bytes) -> io::Result<Bytes> {
         let mut buf = BytesMut::with_capacity(data.len() + 1);
         buf.put_u8(packet_id as u8);
         buf.put(data);
-
         self.ipc_client.request(buf.freeze())
     }
 }

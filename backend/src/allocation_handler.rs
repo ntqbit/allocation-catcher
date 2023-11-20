@@ -18,12 +18,15 @@ impl AllocationHandlerImpl {
 impl detour::AllocationHandler for AllocationHandlerImpl {
     fn on_allocation(&self, allocation: crate::detour::Allocation) {
         if let Some(base_address) = allocation.allocated_base_address {
-            self.storage.lock().unwrap().store(Allocation {
-                base_address,
-                size: allocation.size,
-                heap_handle: allocation.heap_handle,
-                call_stack: CallStack {},
-            });
+            self.storage
+                .lock()
+                .expect("unexpected lock poison")
+                .store(Allocation {
+                    base_address,
+                    size: allocation.size,
+                    heap_handle: allocation.heap_handle,
+                    call_stack: CallStack {},
+                });
         }
     }
 
@@ -31,7 +34,7 @@ impl detour::AllocationHandler for AllocationHandlerImpl {
         if deallocation.success {
             self.storage
                 .lock()
-                .unwrap()
+                .expect("unexpected lock poison")
                 .remove(deallocation.base_address);
         }
     }

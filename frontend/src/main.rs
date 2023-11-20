@@ -2,12 +2,12 @@ mod client;
 mod ipc;
 mod proto;
 
-use bytes::BytesMut;
-use clap::Command;
+use std::io;
+
+use clap::{ArgMatches, Command};
 
 use client::{Client, PacketId};
 use ipc::IpcClient;
-use prost::Message;
 
 fn cli() -> Command {
     Command::new("allocation-catcher")
@@ -18,26 +18,43 @@ fn cli() -> Command {
         .subcommand(Command::new("ping").about("Ping"))
 }
 
-fn main() {
-    // TODO: remove unwrap
-    let matches = cli().get_matches();
+pub trait RequestSpec: prost::Message {
+    const PACKET_ID: PacketId;
 
+    type RESPONSE: prost::Message + Default;
+}
+
+impl RequestSpec for proto::PingRequest {
+    const PACKET_ID: PacketId = PacketId::Ping;
+
+    type RESPONSE = proto::PingResponse;
+}
+
+pub fn send_request<T: RequestSpec>(msg: T) -> io::Result<T::RESPONSE> {
+    let mut client = Client::new(IpcClient::connect("allocation-catcher")?);
+    let response_bytes = client.request(T::PACKET_ID, msg.encode_to_vec().into())?;
+    Ok(<T::RESPONSE as prost::Message>::decode(response_bytes)?)
+}
+
+fn run(matches: ArgMatches) -> io::Result<()> {
     match matches.subcommand() {
         Some(("ping", _)) => {
-            let mut client = Client::new(IpcClient::connect("allocation-catcher").unwrap());
             let challenge = rand::random();
-            let request = proto::PingRequest { num: challenge };
-            let mut buf = BytesMut::new();
-            request.encode(&mut buf).unwrap();
-            let resp = client.request(PacketId::Ping, buf.freeze());
-            let ping_response = proto::PingResponse::decode(resp).unwrap();
+            let req = proto::PingRequest { num: challenge };
+            let ping_response = send_request(req)?;
             if ping_response.num == challenge {
                 println!("Ping-pong! Version: {}", ping_response.version);
             } else {
                 println!("Ping failed! Wrong response challenge.");
             }
         }
-        Some((_, _)) => unreachable!(),
-        None => todo!(),
+        Some((cmd, _)) => panic!("Unhandled command: {}", cmd),
+        None => panic!("How to handle None?"), // TODO: handle
     }
+
+    Ok(())
+}
+
+fn main() {
+    run(cli().get_matches()).unwrap();
 }
