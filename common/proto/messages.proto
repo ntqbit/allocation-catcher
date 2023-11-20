@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package messages;
+
+message PingRequest {
+  int32 num = 1;
+}
+
+message PingResponse {
+  uint32 version = 1;
+  int32 num = 2;
+}
