@@ -1,4 +1,14 @@
-mod ipc;
+use bytes::Bytes;
+pub use sealed::PacketId;
+use std::io;
+
+mod transport;
+
+pub use transport::{serve_ipc, serve_tcp};
+
+pub trait RequestHandler: Send + Sync {
+    fn handle_request(&self, packet: Bytes) -> io::Result<Bytes>;
+}
 
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/messages.rs"));
@@ -7,6 +17,3 @@ pub mod proto {
 mod sealed {
     include!("../../../common/packet_id.rs");
 }
-
-pub use ipc::{serve_ipc, RequestHandler};
-pub use sealed::PacketId;

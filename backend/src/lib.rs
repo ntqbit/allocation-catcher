@@ -10,13 +10,13 @@ mod platform;
 mod server;
 mod state;
 
-use std::{ffi::CString, io, iter};
+use std::{ffi::CString, io, iter, net::SocketAddr};
 
 use crate::{
     allocation_handler::AllocationHandlerImpl,
     allocations_storage::{Address, Allocation, StorageImpl},
     debug::debug_message,
-    server::{proto, serve_ipc, PacketId, RequestHandler},
+    server::{proto, serve_tcp, PacketId, RequestHandler},
     state::{Configuration, State, StateRef},
 };
 use bytes::{Bytes, BytesMut};
@@ -187,7 +187,7 @@ fn initialize() {
 
     let server = make_static!(MyServer::new(state));
 
-    std::thread::spawn(|| serve_ipc("allocation-catcher", server));
+    std::thread::spawn(|| serve_tcp(&SocketAddr::from(([0, 0, 0, 0], 9940)), server));
 }
 
 fn deinitialize() {

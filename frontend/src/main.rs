@@ -1,19 +1,18 @@
 mod client;
-mod ipc;
-mod proto;
+mod transport;
 
-use std::io;
+use std::{io, net::SocketAddr};
 
 use clap::{arg, error::ErrorKind, ArgMatches, Command};
 
-use client::{Client, RequestSpec};
-use ipc::IpcClient;
+use client::{proto, Client, RequestSpec};
 
 pub fn send_request<T: RequestSpec>(msg: T) -> io::Result<T::RESPONSE> {
-    let mut client = Client::new(
-        IpcClient::connect("allocation-catcher")
+    let transport = Box::new(
+        transport::connect_tcp(&SocketAddr::from(([127, 0, 0, 1], 9940)))
             .map_err(|_| io::Error::from(io::ErrorKind::ConnectionRefused))?,
     );
+    let mut client = Client::new(transport);
     let response_bytes = client.request(T::PACKET_ID, msg.encode_to_vec().into())?;
     Ok(<T::RESPONSE as prost::Message>::decode(response_bytes)?)
 }
@@ -81,7 +80,6 @@ fn print_allocations(allocations: &Vec<proto::Allocation>) {
     } else {
         for allocation in allocations {
             print_allocation(allocation);
-            println!();
         }
     }
 }

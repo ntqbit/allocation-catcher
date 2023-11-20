@@ -1,13 +1,18 @@
 use std::io;
 
-use crate::{ipc::IpcClient, proto};
+use bytes::{BufMut, Bytes, BytesMut};
 
-pub mod sealed {
+use crate::transport::Transport;
+
+mod sealed {
     include!("../../common/packet_id.rs");
 }
 
-use bytes::{BufMut, Bytes, BytesMut};
 pub use sealed::PacketId;
+
+pub mod proto {
+    include!(concat!(env!("OUT_DIR"), "/messages.rs"));
+}
 
 pub trait RequestSpec: prost::Message {
     const PACKET_ID: PacketId;
@@ -46,18 +51,18 @@ impl RequestSpec for proto::FindRequest {
 }
 
 pub struct Client {
-    ipc_client: IpcClient,
+    transport: Box<dyn Transport>,
 }
 
 impl Client {
-    pub const fn new(ipc_client: IpcClient) -> Self {
-        Self { ipc_client }
+    pub const fn new(transport: Box<dyn Transport>) -> Self {
+        Self { transport }
     }
 
     pub fn request(&mut self, packet_id: PacketId, data: Bytes) -> io::Result<Bytes> {
         let mut buf = BytesMut::with_capacity(data.len() + 1);
         buf.put_u8(packet_id as u8);
         buf.put(data);
-        self.ipc_client.request(buf.freeze())
+        self.transport.request(buf.freeze())
     }
 }
