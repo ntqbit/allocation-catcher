@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::ops::Bound::{Excluded, Included};
 
-use crate::proto;
+use crate::server::proto;
 
 pub type Address = usize;
 pub type HeapHandle = usize;

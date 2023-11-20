@@ -20,7 +20,7 @@ pub fn serve_ipc<'a>(
     }
 }
 
-pub struct IpcClientServer<T: RequestHandler + 'static> {
+struct IpcClientServer<T: RequestHandler + 'static> {
     stream: LocalSocketStream,
     request_handler: &'static T,
 }

@@ -1,9 +1,6 @@
 use std::sync::{Mutex, MutexGuard};
 
-use crate::{
-    allocations_storage::AllocationsStorage, platform::TlsSlotAcquisition,
-    proto,
-};
+use crate::{allocations_storage::AllocationsStorage, platform::TlsSlotAcquisition, proto};
 
 #[derive(Debug, Clone)]
 pub struct Configuration {
