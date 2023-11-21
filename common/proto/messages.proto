@@ -2,43 +2,34 @@ syntax = "proto3";
 
 package messages;
 
-message PingRequest {
-  int32 num = 1;
-}
+message PingRequest { int32 num = 1; }
 
 message PingResponse {
   uint32 version = 1;
   int32 num = 2;
+  uint32 wordsize = 3;
 }
 
 message Configuration {
   uint64 stack_trace_offset = 1;
   uint64 stack_trace_size = 2;
+
+  uint32 backtrace_frames_skip = 3;
+  uint32 backtrace_frames_count = 4;
+  uint32 backtrace_resolve_symbols_count = 5;
 }
 
-message SetConfigurationRequest {
-  Configuration configuration = 1;
-}
+message SetConfigurationRequest { Configuration configuration = 1; }
 
-message SetConfigurationResponse {
+message SetConfigurationResponse {}
 
-}
+message GetConfigurationRequest {}
 
-message GetConfigurationRequest {
+message GetConfigurationResponse { Configuration configuration = 1; }
 
-}
+message ClearStorageRequest {}
 
-message GetConfigurationResponse {
-  Configuration configuration = 1; 
-}
-
-message ClearStorageRequest {
-
-}
-
-message ClearStorageResponse {
-
-}
+message ClearStorageResponse {}
 
 message Range {
   uint64 lower = 1;
@@ -57,13 +48,34 @@ message FindRecord {
   Filter filter = 2;
 }
 
-message FindRequest {
-  repeated FindRecord records = 1;
+message FindRequest { repeated FindRecord records = 1; }
+
+message StackTrace {
+  uint64 stack_pointer = 1;
+  uint32 wordsize = 2;
+  repeated uint64 trace = 3;
 }
+
+message BackTraceSymbol {
+  optional string name = 1;
+  optional uint64 address = 2;
+}
+
+message BackTraceFrame {
+  uint64 instruction_pointer = 1;
+  uint64 stack_pointer = 2;
+  optional uint64 module_base = 3;
+  repeated BackTraceSymbol resolved_symbols = 4;
+}
+
+message BackTrace { repeated BackTraceFrame frames = 1; }
 
 message Allocation {
   uint64 base_address = 1;
   uint64 size = 2;
+  uint64 heap_handle = 3;
+  StackTrace stack_trace = 4;
+  BackTrace back_trace = 5;
 }
 
 message FoundAllocation {
@@ -71,9 +83,7 @@ message FoundAllocation {
   repeated Allocation allocations = 2;
 }
 
-message FindResponse {
-  repeated FoundAllocation allocations = 1;
-}
+message FindResponse { repeated FoundAllocation allocations = 1; }
 
 message Statistics {
   uint64 total_allocations = 1;
@@ -82,18 +92,10 @@ message Statistics {
   uint64 allocated = 4;
 }
 
-message GetStatisticsRequest {
+message GetStatisticsRequest {}
 
-}
+message GetStatisticsResponse { Statistics statistics = 1; }
 
-message GetStatisticsResponse {
-  Statistics statistics = 1;
-}
+message ResetStatisticsRequest {}
 
-message ResetStatisticsRequest {
-
-}
-
-message ResetStatisticsResponse {
-  
-}
+message ResetStatisticsResponse {}

@@ -75,11 +75,6 @@ impl<'a> Drop for AcquisitionGuard<'a> {
     }
 }
 
-#[repr(usize)]
-pub enum Slot {
-    Alloc = 0,
-    Free = 1,
-}
 
 // Prevention of recursive detour call
 pub struct DetourLock {
@@ -93,8 +88,8 @@ impl DetourLock {
         }
     }
 
-    pub fn acquire_slot(&self, slot: Slot) -> Option<AcquisitionGuard> {
-        let mask = 1 << (slot as usize);
+    pub fn acquire(&self) -> Option<AcquisitionGuard> {
+        let mask = 1;
         let acquisition = self.tls_slot_acquisition.acquire(mask);
 
         if acquisition != 0 {
@@ -107,15 +102,8 @@ impl DetourLock {
         }
     }
 
-    pub fn acquire_all(&self) -> AcquisitionGuard {
-        AcquisitionGuard::new(
-            &self.tls_slot_acquisition,
-            self.tls_slot_acquisition.acquire(!0),
-        )
-    }
-
     pub fn is_acquired(&self) -> bool {
-        self.tls_slot_acquisition.get() == !0
+        self.tls_slot_acquisition.get() & 1 == 1
     }
 }
 

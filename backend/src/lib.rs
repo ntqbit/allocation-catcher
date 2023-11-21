@@ -40,6 +40,10 @@ impl RequestHandler for MyServer {
     }
 }
 
+fn wordsize() -> u32 {
+    core::mem::size_of::<usize>() as u32
+}
+
 impl MyServer {
     pub const fn new(state: StateRef) -> Self {
         Self { state }
@@ -86,6 +90,7 @@ impl MyServer {
                 proto::PingResponse {
                     version: 1,
                     num: req.num,
+                    wordsize: wordsize(),
                 }
                 .encode(&mut response)
                 .ok()?;
@@ -181,7 +186,10 @@ where
 {
     std::thread::spawn(|| {
         // Disable detour calls for this thread.
-        detour::lock().acquire_all().forget();
+        detour::lock()
+            .acquire()
+            .expect("detour lock must not be locked in new thread")
+            .forget();
 
         f()
     })
@@ -189,7 +197,7 @@ where
 
 pub fn initialize() {
     // REQUIRED: initializes the detour lock.
-    let _ack = detour::lock().acquire_all();
+    let _ack = detour::lock().acquire().unwrap();
 
     debug_message!("Initialize");
 

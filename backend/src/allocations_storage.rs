@@ -7,14 +7,75 @@ pub type Address = usize;
 pub type HeapHandle = usize;
 
 #[derive(Debug, Clone)]
-pub struct CallStack {}
+pub struct StackTrace {
+    pub base: usize,
+    pub trace: Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BackTraceSymbol {
+    pub name: Option<String>,
+    pub address: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BackTraceFrame {
+    pub instruction_pointer: usize,
+    pub stack_pointer: usize,
+    pub module_base: Option<usize>,
+    pub resolved_symbols: Vec<BackTraceSymbol>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BackTrace {
+    pub frames: Vec<BackTraceFrame>,
+}
 
 #[derive(Debug, Clone)]
 pub struct Allocation {
     pub base_address: Address,
     pub size: usize,
     pub heap_handle: HeapHandle,
-    pub call_stack: CallStack,
+    pub stack_trace: Option<StackTrace>,
+    pub back_trace: Option<BackTrace>,
+}
+
+impl From<&StackTrace> for proto::StackTrace {
+    fn from(value: &StackTrace) -> Self {
+        Self {
+            stack_pointer: value.base as u64,
+            wordsize: crate::wordsize(),
+            trace: value.trace.iter().map(|&x| x as u64).collect(),
+        }
+    }
+}
+
+impl From<&BackTraceSymbol> for proto::BackTraceSymbol {
+    fn from(value: &BackTraceSymbol) -> Self {
+        Self {
+            name: value.name.as_ref().map(|x| x.clone()),
+            address: value.address.map(|x| x as u64),
+        }
+    }
+}
+
+impl From<&BackTraceFrame> for proto::BackTraceFrame {
+    fn from(value: &BackTraceFrame) -> Self {
+        Self {
+            instruction_pointer: value.instruction_pointer as u64,
+            stack_pointer: value.stack_pointer as u64,
+            module_base: value.module_base.map(|x| x as u64),
+            resolved_symbols: value.resolved_symbols.iter().map(|x| x.into()).collect(),
+        }
+    }
+}
+
+impl From<&BackTrace> for proto::BackTrace {
+    fn from(value: &BackTrace) -> Self {
+        Self {
+            frames: value.frames.iter().map(|x| x.into()).collect(),
+        }
+    }
 }
 
 impl From<&Allocation> for proto::Allocation {
@@ -22,7 +83,9 @@ impl From<&Allocation> for proto::Allocation {
         Self {
             base_address: value.base_address as u64,
             size: value.size as u64,
-            // TODO: complete
+            heap_handle: value.heap_handle as u64,
+            stack_trace: value.stack_trace.as_ref().map(|x| x.into()),
+            back_trace: value.back_trace.as_ref().map(|x| x.into()),
         }
     }
 }

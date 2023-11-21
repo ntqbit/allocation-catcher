@@ -6,13 +6,19 @@ use crate::{allocations_storage::AllocationsStorage, proto};
 pub struct Configuration {
     pub stack_trace_offset: usize,
     pub stack_trace_size: usize,
+    pub backtrace_frames_skip: u32,
+    pub backtrace_frames_count: u32,
+    pub backtrace_resolve_symbols_count: u32,
 }
 
 impl Default for Configuration {
     fn default() -> Self {
         Self {
             stack_trace_offset: 0x0,
-            stack_trace_size: 0x10,
+            stack_trace_size: 0x0,
+            backtrace_frames_count: 0x0,
+            backtrace_frames_skip: 0x0,
+            backtrace_resolve_symbols_count: 0x0,
         }
     }
 }
@@ -22,6 +28,9 @@ impl From<proto::Configuration> for Configuration {
         Self {
             stack_trace_offset: value.stack_trace_offset as usize,
             stack_trace_size: value.stack_trace_size as usize,
+            backtrace_frames_count: value.backtrace_frames_count,
+            backtrace_frames_skip: value.backtrace_frames_skip,
+            backtrace_resolve_symbols_count: value.backtrace_resolve_symbols_count,
         }
     }
 }
@@ -31,6 +40,9 @@ impl From<Configuration> for proto::Configuration {
         Self {
             stack_trace_offset: value.stack_trace_offset as u64,
             stack_trace_size: value.stack_trace_size as u64,
+            backtrace_frames_count: value.backtrace_frames_count,
+            backtrace_frames_skip: value.backtrace_frames_skip,
+            backtrace_resolve_symbols_count: value.backtrace_resolve_symbols_count,
         }
     }
 }

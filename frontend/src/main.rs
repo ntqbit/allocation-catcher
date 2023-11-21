@@ -4,7 +4,7 @@ mod transport;
 use std::{io, net::SocketAddr};
 
 use anyhow::anyhow;
-use clap::{arg, error::ErrorKind, ArgMatches, Command};
+use clap::{arg, error::ErrorKind, value_parser, ArgMatches, Command};
 
 use client::{proto, Client, RequestSpec};
 
@@ -36,11 +36,14 @@ fn clear() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn setcfg() -> anyhow::Result<()> {
+fn setcfg(_cmd: &mut Command, sub: &ArgMatches) -> anyhow::Result<()> {
     send_request(proto::SetConfigurationRequest {
         configuration: Some(proto::Configuration {
-            stack_trace_offset: 0x10,
-            stack_trace_size: 5,
+            stack_trace_offset: *sub.get_one("stoff").unwrap(),
+            stack_trace_size: *sub.get_one("stsize").unwrap(),
+            backtrace_frames_skip: *sub.get_one("btskip").unwrap(),
+            backtrace_frames_count: *sub.get_one("btcount").unwrap(),
+            backtrace_resolve_symbols_count: *sub.get_one("btsymbols").unwrap(),
         }),
     })?;
     println!("Done!");
@@ -165,7 +168,7 @@ fn run(mut cmd: Command) -> anyhow::Result<()> {
     match cmd.get_matches_mut().subcommand().unwrap() {
         ("ping", _) => ping()?,
         ("clear", _) => clear()?,
-        ("setcfg", _) => setcfg()?,
+        ("setcfg", sub) => setcfg(&mut cmd, sub)?,
         ("getcfg", _) => getcfg()?,
         ("dump", _) => dump()?,
         ("find", sub) => find(sub)?,
@@ -195,7 +198,35 @@ fn cli() -> Command {
         .arg_required_else_help(true)
         .subcommand(Command::new("ping").about("Ping"))
         .subcommand(Command::new("getcfg").about("Get configuration"))
-        .subcommand(Command::new("setcfg").about("Set configuration"))
+        .subcommand(
+            Command::new("setcfg")
+                .about("Set configuration")
+                .arg(
+                    arg!(--stoff <stack_trace_offset> "Stack trace offset")
+                        .value_parser(value_parser!(u64))
+                        .required(true),
+                )
+                .arg(
+                    arg!(--stsize <stack_trace_size> "Stack trace size")
+                        .value_parser(value_parser!(u64))
+                        .required(true),
+                )
+                .arg(
+                    arg!(--btskip <backtrace_frames_skip> "Backtrace frames skip")
+                        .value_parser(value_parser!(u32))
+                        .required(true),
+                )
+                .arg(
+                    arg!(--btcount <backtrace_frames_count> "Backtrace frames count")
+                        .value_parser(value_parser!(u32))
+                        .required(true),
+                )
+                .arg(
+                    arg!(--btsymbols <backtrace_resolve_symbols_count> "Backtrace resolve symbols count")
+                        .value_parser(value_parser!(u32))
+                        .required(true),
+                ),
+        )
         .subcommand(Command::new("clear").about("Clear storage"))
         .subcommand(Command::new("dump").about("Dump storage"))
         .subcommand(
