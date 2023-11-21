@@ -57,7 +57,7 @@ pub fn serve_stream<T: TransportListener>(
 ) -> io::Result<()> {
     loop {
         let stream = transport.accept()?;
-        spawn_thread(move || {
+        spawn_thread(|| {
             serve_stream_client(stream, request_handler).ok();
         });
     }

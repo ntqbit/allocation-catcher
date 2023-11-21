@@ -24,7 +24,7 @@ use num_enum::TryFromPrimitive;
 use prost::Message;
 use static_cell::make_static;
 
-pub struct MyServer {
+struct MyServer {
     state: StateRef,
 }
 
@@ -158,10 +158,6 @@ impl MyServer {
     }
 }
 
-fn initialize_panic_handler() {
-    std::panic::set_hook(Box::new(|panic_info| platform::handle_panic(panic_info)));
-}
-
 fn initialize_detour(state: StateRef) {
     unsafe {
         detour::set_allocation_handler(make_static!(AllocationHandlerImpl::new(state)));
@@ -171,28 +167,32 @@ fn initialize_detour(state: StateRef) {
         detour::initialize().expect("detour initialize failed");
         debug_message!("detour initialized");
 
+        assert!(detour::is_initialized());
+
         detour::enable().expect("detour enable failed");
         debug_message!("detour enabled");
+
+        assert!(detour::is_enabled());
     }
 }
 
-pub fn spawn_thread<F, T>(f: F) -> std::thread::JoinHandle<T>
+pub(crate) fn spawn_thread<F, T>(f: F) -> std::thread::JoinHandle<T>
 where
     F: FnOnce() -> T,
     F: Send + 'static,
     T: Send + 'static,
 {
-    // Disable detour calls for this thread.
-    unsafe { detour::lock() }.acquire_all().forget();
+    std::thread::spawn(|| {
+        // Disable detour calls for this thread.
+        unsafe { detour::lock() }.acquire_all().forget();
 
-    std::thread::spawn(f)
+        f()
+    })
 }
 
-fn initialize() {
+pub fn initialize() {
     // REQUIRED: initializes the detour lock.
     let _ack = unsafe { detour::lock() }.acquire_all();
-
-    initialize_panic_handler();
 
     debug_message!("Initialize");
 
@@ -206,12 +206,12 @@ fn initialize() {
 
     let server = make_static!(MyServer::new(state));
 
-    spawn_thread(move || {
+    spawn_thread(|| {
         serve_tcp(&SocketAddr::from(([0, 0, 0, 0], 9940)), server).unwrap();
     });
 }
 
-fn deinitialize() {
+pub fn deinitialize() {
     unsafe {
         detour::disable().expect("detour disable failed");
         detour::uninitialize().expect("detour uninitialize failed");

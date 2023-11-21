@@ -1,0 +1,11 @@
+[package]
+name = "allocation-catcher-dylib"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+allocation-catcher-backend = { version = "0.1.0", path = "../allocation-catcher-backend" }
+winapi = "0.3.9"

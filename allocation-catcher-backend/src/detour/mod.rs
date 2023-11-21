@@ -4,7 +4,7 @@ mod rtl_heap_detour;
 
 pub use rtl_heap_detour::{disable, enable, initialize, is_enabled, is_initialized, uninitialize};
 
-use crate::platform::TlsSlotAcquisition;
+use crate::{debug::debug_message, platform::TlsSlotAcquisition};
 
 #[derive(Debug)]
 pub enum Error {
@@ -118,6 +118,9 @@ impl DetourLock {
     }
 
     pub fn is_acquired(&self) -> bool {
+        debug_message!("is_acquired: {}", unsafe {
+            self.tls_slot_acquisition.get()
+        });
         unsafe { self.tls_slot_acquisition.get() == !0 }
     }
 }

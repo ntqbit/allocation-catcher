@@ -1,6 +1,6 @@
 mod windows;
 
-pub use windows::{debug_message_fmt, TlsKey, handle_panic};
+pub use windows::{debug_message_fmt, TlsKey};
 
 pub struct TlsSlotAcquisition {
     tls_key: TlsKey<usize>,
