@@ -1,0 +1,11 @@
+[workspace]
+members = ["backend", "dylib", "frontend", "common"]
+resolver = "2"
+
+[workspace.dependencies]
+num_enum = "0.7.1"
+prost = "0.12.2"
+anyhow = "1.0.75"
+bytes = "1.5.0"
+
+common = { path = "./common" }

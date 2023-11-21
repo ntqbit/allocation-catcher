@@ -4,15 +4,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::transport::Transport;
 
-mod sealed {
-    include!("../../common/packet_id.rs");
-}
-
-pub use sealed::PacketId;
-
-pub mod proto {
-    include!(concat!(env!("OUT_DIR"), "/messages.rs"));
-}
+pub use common::{proto, PacketId};
 
 pub trait RequestSpec: prost::Message {
     const PACKET_ID: PacketId;

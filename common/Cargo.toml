@@ -1,0 +1,11 @@
+[package]
+name = "common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+num_enum = { workspace = true }
+prost = { workspace = true }
+
+[build-dependencies]
+prost-build = "0.12.2"

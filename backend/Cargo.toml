@@ -4,14 +4,20 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bytes = "1.5.0"
 heapless = "0.8.0"
 lazy_static = "1.4.0"
-num_enum = "0.7.1"
-prost = "0.12.2"
 retour = { version = "0.3.1", features = ["nightly", "static-detour"] }
 static_cell = { version = "2.0.0", features = ["nightly"] }
-winapi = { version = "0.3.9", features = ["winuser", "libloaderapi", "synchapi", "winbase", "heapapi", "debugapi"] }
+winapi = { version = "0.3.9", features = [
+    "winuser",
+    "libloaderapi",
+    "synchapi",
+    "winbase",
+    "heapapi",
+    "debugapi",
+] }
 
-[build-dependencies]
-prost-build = "0.12.2"
+bytes = { workspace = true }
+common = { workspace = true }
+num_enum = { workspace = true }
+prost = { workspace = true }
