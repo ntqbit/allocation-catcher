@@ -34,7 +34,7 @@ static mut INITIAILIZED: AtomicBool = AtomicBool::new(false);
 fn RtlAllocateHeapDetour(HeapHandle: PVOID, Flags: ULONG, Size: SIZE_T) -> PVOID {
     let base_address = RtlAllocateHeapHook.call(HeapHandle, Flags, Size);
 
-    if let Some(_guard) = unsafe { lock() }.acquire_slot(Slot::Alloc) {
+    if let Some(_guard) = lock().acquire_slot(Slot::Alloc) {
         unsafe { allocation_handler() }.on_allocation(Allocation {
             heap_handle: HeapHandle as usize,
             size: Size as usize,
@@ -53,7 +53,7 @@ fn RtlAllocateHeapDetour(HeapHandle: PVOID, Flags: ULONG, Size: SIZE_T) -> PVOID
 fn RtlFreeHeapDetour(HeapHandle: PVOID, Flags: ULONG, BaseAddress: PVOID) -> BOOL {
     let success = RtlFreeHeapHook.call(HeapHandle, Flags, BaseAddress);
 
-    if let Some(_guard) = unsafe { lock() }.acquire_slot(Slot::Free) {
+    if let Some(_guard) = lock().acquire_slot(Slot::Free) {
         unsafe { allocation_handler() }.on_deallocation(Deallocation {
             heap_handle: HeapHandle as usize,
             base_address: BaseAddress as usize,

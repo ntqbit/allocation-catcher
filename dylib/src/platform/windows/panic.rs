@@ -1,20 +1,17 @@
-use std::{panic::PanicInfo, ffi::CString};
+use std::{ffi::CString, panic::PanicInfo};
 
 use winapi::um::winuser::MessageBoxA;
 
 pub fn handle_panic(panic_info: &PanicInfo) {
-    if let Ok(cstring) = CString::new(panic_info.to_string()) {
-        unsafe {
-            MessageBoxA(0 as _, cstring.as_ptr() as _, b"PANIC\0".as_ptr() as _, 0);
-        }
+    let res = CString::new(panic_info.to_string());
+
+    let str = if let Ok(cstring) = res.as_ref() {
+        cstring.as_ptr()
     } else {
-        unsafe {
-            MessageBoxA(
-                0 as _,
-                b"panic info contained a nul byte\0".as_ptr() as _,
-                b"PANIC\0".as_ptr() as _,
-                0,
-            );
-        }
+        b"panic info contained a nul byte\0".as_ptr() as _
+    };
+
+    unsafe {
+        MessageBoxA(0 as _, str, b"Panic\0".as_ptr() as _, 0);
     }
 }

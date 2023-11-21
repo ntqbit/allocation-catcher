@@ -30,7 +30,7 @@ struct MyServer {
 
 impl RequestHandler for MyServer {
     fn handle_request(&self, mut packet: Bytes) -> io::Result<Bytes> {
-        assert!(unsafe { detour::lock() }.is_acquired());
+        assert!(detour::lock().is_acquired());
 
         let packet_id_num = packet[0];
         let packet_id = PacketId::try_from_primitive(packet_id_num)
@@ -161,17 +161,14 @@ impl MyServer {
 fn initialize_detour(state: StateRef) {
     unsafe {
         detour::set_allocation_handler(make_static!(AllocationHandlerImpl::new(state)));
-
         debug_message!("set_allocation_handler done");
 
         detour::initialize().expect("detour initialize failed");
         debug_message!("detour initialized");
-
         assert!(detour::is_initialized());
 
         detour::enable().expect("detour enable failed");
         debug_message!("detour enabled");
-
         assert!(detour::is_enabled());
     }
 }
@@ -184,7 +181,7 @@ where
 {
     std::thread::spawn(|| {
         // Disable detour calls for this thread.
-        unsafe { detour::lock() }.acquire_all().forget();
+        detour::lock().acquire_all().forget();
 
         f()
     })
@@ -192,7 +189,7 @@ where
 
 pub fn initialize() {
     // REQUIRED: initializes the detour lock.
-    let _ack = unsafe { detour::lock() }.acquire_all();
+    let _ack = detour::lock().acquire_all();
 
     debug_message!("Initialize");
 

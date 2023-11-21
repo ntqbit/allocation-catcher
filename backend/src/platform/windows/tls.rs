@@ -14,8 +14,8 @@ impl<T> TlsKey<T>
 where
     T: From<usize> + Into<usize>,
 {
-    pub unsafe fn new() -> Result<Self, ()> {
-        let slot = TlsAlloc();
+    pub fn new() -> Result<Self, ()> {
+        let slot = unsafe { TlsAlloc() };
         if slot == TLS_OUT_OF_INDEXES {
             Err(())
         } else {
@@ -26,12 +26,14 @@ where
         }
     }
 
-    pub unsafe fn get(&self) -> T {
-        T::from(TlsGetValue(self.slot) as usize)
+    pub fn get(&self) -> T {
+        T::from(unsafe { TlsGetValue(self.slot) as usize })
     }
 
-    pub unsafe fn set(&self, val: T) {
-        TlsSetValue(self.slot, val.into() as LPVOID);
+    pub fn set(&self, val: T) {
+        unsafe {
+            TlsSetValue(self.slot, val.into() as LPVOID);
+        }
     }
 }
 
