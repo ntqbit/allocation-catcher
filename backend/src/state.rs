@@ -52,6 +52,7 @@ pub type StateRef = &'static State;
 #[derive(Debug, Default, Clone)]
 pub struct Statistics {
     pub total_allocations: usize,
+    pub total_reallocations: usize,
     pub total_deallocations: usize,
     pub total_deallocations_non_allocated: usize,
 }

@@ -136,4 +136,30 @@ impl detour::AllocationHandler for AllocationHandlerImpl {
             }
         }
     }
+
+    fn on_reallocation(&self, reallocation: detour::Reallocation) {
+        if let Some(base_address) = reallocation.allocated_base_address {
+            let configuration = self.state.get_configuration();
+            let stack_trace = create_stack_trace(&configuration);
+            let back_trace = create_back_trace(&configuration);
+
+            {
+                let mut storage = self.state.lock_storage();
+                storage.remove(reallocation.base_address).ok();
+                storage.store(Allocation {
+                    base_address,
+                    size: reallocation.size,
+                    heap_handle: reallocation.heap_handle,
+                    stack_trace,
+                    back_trace,
+                });
+            }
+
+            {
+                // Update statistics
+                let mut stats = self.state.lock_statistics();
+                stats.total_reallocations += 1;
+            }
+        }
+    }
 }

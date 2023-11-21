@@ -1,10 +1,8 @@
-use lazy_static::lazy_static;
-
+mod flag;
 mod rtl_heap_detour;
 
-pub use rtl_heap_detour::{disable, enable, initialize, is_enabled, is_initialized, uninitialize};
-
-use crate::platform::TlsSlotAcquisition;
+pub use flag::{flag_set, AcquisitionGuard, DetourFlag, DetourFlagSet};
+pub use rtl_heap_detour::{disable, enable, initialize, uninitialize};
 
 #[derive(Debug)]
 pub enum Error {
@@ -23,6 +21,13 @@ pub struct Allocation {
     pub allocated_base_address: Option<usize>,
 }
 
+pub struct Reallocation {
+    pub heap_handle: HeapHandle,
+    pub base_address: usize,
+    pub size: usize,
+    pub allocated_base_address: Option<usize>,
+}
+
 pub struct Deallocation {
     pub heap_handle: HeapHandle,
     pub base_address: usize,
@@ -33,6 +38,8 @@ pub trait AllocationHandler: Sync {
     fn on_allocation(&self, allocation: Allocation);
 
     fn on_deallocation(&self, deallocation: Deallocation);
+
+    fn on_reallocation(&self, reallocation: Reallocation);
 }
 
 pub struct NoopAllocationHandler;
@@ -41,6 +48,8 @@ impl AllocationHandler for NoopAllocationHandler {
     fn on_allocation(&self, _allocation: Allocation) {}
 
     fn on_deallocation(&self, _deallocation: Deallocation) {}
+
+    fn on_reallocation(&self, _reallocation: Reallocation) {}
 }
 
 static mut ALLOCATION_HANDLER: &'static dyn AllocationHandler = &NoopAllocationHandler;
@@ -52,65 +61,4 @@ pub unsafe fn set_allocation_handler(handler: &'static dyn AllocationHandler) {
 
 pub unsafe fn allocation_handler() -> &'static dyn AllocationHandler {
     ALLOCATION_HANDLER
-}
-
-pub struct AcquisitionGuard<'a> {
-    tls: &'a TlsSlotAcquisition,
-    acquisition: usize,
-}
-
-impl<'a> AcquisitionGuard<'a> {
-    pub const fn new(tls: &'a TlsSlotAcquisition, acquisition: usize) -> Self {
-        Self { tls, acquisition }
-    }
-
-    pub fn forget(self) {
-        core::mem::forget(self)
-    }
-}
-
-impl<'a> Drop for AcquisitionGuard<'a> {
-    fn drop(&mut self) {
-        self.tls.release(self.acquisition);
-    }
-}
-
-
-// Prevention of recursive detour call
-pub struct DetourLock {
-    tls_slot_acquisition: TlsSlotAcquisition,
-}
-
-impl DetourLock {
-    pub fn new() -> Self {
-        Self {
-            tls_slot_acquisition: TlsSlotAcquisition::new().expect("failed to allocate tls slot"),
-        }
-    }
-
-    pub fn acquire(&self) -> Option<AcquisitionGuard> {
-        let mask = 1;
-        let acquisition = self.tls_slot_acquisition.acquire(mask);
-
-        if acquisition != 0 {
-            Some(AcquisitionGuard::new(
-                &self.tls_slot_acquisition,
-                acquisition,
-            ))
-        } else {
-            None
-        }
-    }
-
-    pub fn is_acquired(&self) -> bool {
-        self.tls_slot_acquisition.get() & 1 == 1
-    }
-}
-
-lazy_static! {
-    static ref DETOUR_LOCK: DetourLock = DetourLock::new();
-}
-
-pub fn lock() -> &'static DetourLock {
-    &DETOUR_LOCK
 }

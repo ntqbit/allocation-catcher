@@ -87,6 +87,7 @@ message FindResponse { repeated FoundAllocation allocations = 1; }
 
 message Statistics {
   uint64 total_allocations = 1;
+  uint64 total_reallocations = 5;
   uint64 total_deallocations = 2;
   uint64 total_deallocations_non_allocated = 3;
   uint64 allocated = 4;

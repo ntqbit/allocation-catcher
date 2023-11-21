@@ -1,5 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use retour::static_detour;
 use winapi::{
     shared::{
@@ -7,19 +5,29 @@ use winapi::{
         minwindef::BOOL,
         ntdef::{PVOID, ULONG},
     },
-    um::libloaderapi::{GetProcAddress, LoadLibraryA},
+    um::{
+        libloaderapi::{GetProcAddress, LoadLibraryA},
+        winnt::HEAP_NO_SERIALIZE,
+    },
 };
 
-use super::lock;
-
-use super::{allocation_handler, Allocation, Deallocation, Error};
+use super::{
+    allocation_handler, flag_set, Allocation, Deallocation, DetourFlag, Error, Reallocation,
+};
 
 static_detour! {
     static RtlAllocateHeapHook: extern "system" fn(
         PVOID,
         ULONG,
         SIZE_T
-      ) -> PVOID;
+    ) -> PVOID;
+
+    static RtlReAllocateHeapHook: extern "system" fn(
+        PVOID,
+        ULONG,
+        PVOID,
+        SIZE_T
+    ) -> PVOID;
 
     static RtlFreeHeapHook: extern "system" fn(
         PVOID,
@@ -28,48 +36,85 @@ static_detour! {
     ) -> BOOL;
 }
 
-static mut INITIAILIZED: AtomicBool = AtomicBool::new(false);
+fn handle_detour<T: Copy>(
+    flags: ULONG,
+    forward: impl FnOnce(ULONG) -> T,
+    handle: impl FnOnce(T),
+) -> T {
+    // Do not handle all the recursive calls to detour functions.
+    let recursion_lock = flag_set().acquire(DetourFlag::Lock);
+
+    // Call original function.
+    let result = forward(flags);
+
+    // Handle only non-recursive calls and calls without HEAP_NO_SERIALIZE flag set.
+    // If flag HEAP_NO_SERIALIZE is set, then it is possible that the heap is already locked.
+    // Handling this call may lock a mutex that may be already locked by antoher thread
+    // waiting for heap to be unlocked. Deadlock.
+    if recursion_lock.is_some() && (flags & HEAP_NO_SERIALIZE) == 0 {
+        handle(result);
+    }
+
+    result
+}
 
 #[allow(non_snake_case)]
 fn RtlAllocateHeapDetour(HeapHandle: PVOID, Flags: ULONG, Size: SIZE_T) -> PVOID {
-    let base_address = RtlAllocateHeapHook.call(HeapHandle, Flags, Size);
+    handle_detour(
+        Flags,
+        |flags| RtlAllocateHeapHook.call(HeapHandle, flags, Size),
+        |base_address| {
+            unsafe { allocation_handler() }.on_allocation(Allocation {
+                heap_handle: HeapHandle as usize,
+                size: Size as usize,
+                allocated_base_address: if base_address.is_null() {
+                    None
+                } else {
+                    Some(base_address as usize)
+                },
+            });
+        },
+    )
+}
 
-    if let Some(_guard) = lock().acquire() {
-        unsafe { allocation_handler() }.on_allocation(Allocation {
-            heap_handle: HeapHandle as usize,
-            size: Size as usize,
-            allocated_base_address: if base_address.is_null() {
-                None
-            } else {
-                Some(base_address as usize)
-            },
-        });
-    }
-
-    base_address
+#[allow(non_snake_case)]
+fn RtlReAllocateHeapDetour(
+    HeapHandle: PVOID,
+    Flags: ULONG,
+    BaseAddress: PVOID,
+    Size: SIZE_T,
+) -> PVOID {
+    handle_detour(
+        Flags,
+        |flags| RtlReAllocateHeapHook.call(HeapHandle, flags, BaseAddress, Size),
+        |base_address| {
+            unsafe { allocation_handler() }.on_reallocation(Reallocation {
+                heap_handle: HeapHandle as usize,
+                size: Size as usize,
+                base_address: BaseAddress as usize,
+                allocated_base_address: if base_address.is_null() {
+                    None
+                } else {
+                    Some(base_address as usize)
+                },
+            });
+        },
+    )
 }
 
 #[allow(non_snake_case)]
 fn RtlFreeHeapDetour(HeapHandle: PVOID, Flags: ULONG, BaseAddress: PVOID) -> BOOL {
-    let success = RtlFreeHeapHook.call(HeapHandle, Flags, BaseAddress);
-
-    if let Some(_guard) = lock().acquire() {
-        unsafe { allocation_handler() }.on_deallocation(Deallocation {
-            heap_handle: HeapHandle as usize,
-            base_address: BaseAddress as usize,
-            success: success != 0,
-        });
-    }
-
-    success
-}
-
-pub fn is_initialized() -> bool {
-    unsafe { INITIAILIZED.load(Ordering::SeqCst) }
-}
-
-pub fn is_enabled() -> bool {
-    RtlAllocateHeapHook.is_enabled()
+    handle_detour(
+        Flags,
+        |flags| RtlFreeHeapHook.call(HeapHandle, flags, BaseAddress),
+        |success| {
+            unsafe { allocation_handler() }.on_deallocation(Deallocation {
+                heap_handle: HeapHandle as usize,
+                base_address: BaseAddress as usize,
+                success: success != 0,
+            });
+        },
+    )
 }
 
 #[allow(non_snake_case)]
@@ -82,10 +127,15 @@ pub unsafe fn initialize() -> Result<(), Error> {
 
     // Find allocate/free procedures
     let rtl_allocate_heap_proc = GetProcAddress(ntdll_module, b"RtlAllocateHeap\0".as_ptr() as _);
+    let rtl_reallocate_heap_proc =
+        GetProcAddress(ntdll_module, b"RtlReAllocateHeap\0".as_ptr() as _);
     let rtl_free_heap_proc = GetProcAddress(ntdll_module, b"RtlFreeHeap\0".as_ptr() as _);
 
     // Check for errors
-    if rtl_allocate_heap_proc.is_null() || rtl_free_heap_proc.is_null() {
+    if rtl_allocate_heap_proc.is_null()
+        || rtl_reallocate_heap_proc.is_null()
+        || rtl_free_heap_proc.is_null()
+    {
         return Err(Error::CouldNotFindProc);
     }
 
@@ -95,32 +145,35 @@ pub unsafe fn initialize() -> Result<(), Error> {
             core::mem::transmute(rtl_allocate_heap_proc),
             RtlAllocateHeapDetour,
         )
-        .or(Err(Error::HookInitializeFailed))?;
-    RtlFreeHeapHook
-        .initialize(core::mem::transmute(rtl_free_heap_proc), RtlFreeHeapDetour)
-        .or(Err(Error::HookInitializeFailed))?;
+        .and_then(|_| {
+            RtlReAllocateHeapHook.initialize(
+                core::mem::transmute(rtl_reallocate_heap_proc),
+                RtlReAllocateHeapDetour,
+            )
+        })
+        .and_then(|_| {
+            RtlFreeHeapHook.initialize(core::mem::transmute(rtl_free_heap_proc), RtlFreeHeapDetour)
+        })
+        .map_err(|_| Error::HookInitializeFailed)?;
 
-    INITIAILIZED.store(true, Ordering::SeqCst);
     Ok(())
 }
 
 // SAFETY: `initialize` must be called before this method is called
 pub unsafe fn enable() -> Result<(), Error> {
-    RtlAllocateHeapHook
-        .enable()
-        .or(Err(Error::HookEnableFailed))?;
-    RtlFreeHeapHook.enable().or(Err(Error::HookEnableFailed))?;
     Ok(())
+        .and_then(|_| RtlAllocateHeapHook.enable())
+        .and_then(|_| RtlReAllocateHeapHook.enable())
+        .and_then(|_| RtlFreeHeapHook.enable())
+        .map_err(|_| Error::HookEnableFailed)
 }
 
 pub unsafe fn disable() -> Result<(), Error> {
-    RtlAllocateHeapHook
-        .disable()
-        .or(Err(Error::HookDisableFailed))?;
-    RtlFreeHeapHook
-        .disable()
-        .or(Err(Error::HookDisableFailed))?;
     Ok(())
+        .and_then(|_| RtlAllocateHeapHook.disable())
+        .and_then(|_| RtlReAllocateHeapHook.disable())
+        .and_then(|_| RtlFreeHeapHook.disable())
+        .map_err(|_| Error::HookDisableFailed)
 }
 
 pub unsafe fn uninitialize() -> Result<(), Error> {

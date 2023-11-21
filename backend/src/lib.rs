@@ -30,7 +30,7 @@ struct MyServer {
 
 impl RequestHandler for MyServer {
     fn handle_request(&self, mut packet: Bytes) -> io::Result<Bytes> {
-        assert!(detour::lock().is_acquired());
+        assert!(detour::flag_set().is_acquired(detour::DetourFlag::Lock));
 
         let packet_id_num = packet[0];
         let packet_id = PacketId::try_from_primitive(packet_id_num)
@@ -138,6 +138,7 @@ impl MyServer {
                 proto::GetStatisticsResponse {
                     statistics: Some(proto::Statistics {
                         total_allocations: statistics.total_allocations as u64,
+                        total_reallocations: statistics.total_reallocations as u64,
                         total_deallocations: statistics.total_deallocations as u64,
                         total_deallocations_non_allocated: statistics
                             .total_deallocations_non_allocated
@@ -170,11 +171,9 @@ fn initialize_detour(state: StateRef) {
 
         detour::initialize().expect("detour initialize failed");
         debug_message!("detour initialized");
-        assert!(detour::is_initialized());
 
         detour::enable().expect("detour enable failed");
         debug_message!("detour enabled");
-        assert!(detour::is_enabled());
     }
 }
 
@@ -186,8 +185,8 @@ where
 {
     std::thread::spawn(|| {
         // Disable detour calls for this thread.
-        detour::lock()
-            .acquire()
+        detour::flag_set()
+            .acquire(detour::DetourFlag::Lock)
             .expect("detour lock must not be locked in new thread")
             .forget();
 
@@ -197,7 +196,9 @@ where
 
 pub fn initialize() {
     // REQUIRED: initializes the detour lock.
-    let _ack = detour::lock().acquire().unwrap();
+    let _ack = detour::flag_set()
+        .acquire(detour::DetourFlag::Lock)
+        .unwrap();
 
     debug_message!("Initialize");
 
