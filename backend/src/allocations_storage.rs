@@ -30,7 +30,7 @@ impl From<&Allocation> for proto::Allocation {
 pub trait AllocationsStorage: Sync + Send {
     fn store(&mut self, allocation: Allocation);
 
-    fn remove(&mut self, address: Address);
+    fn remove(&mut self, address: Address) -> Result<(), ()>;
 
     fn find(&self, address: Address) -> Option<&Allocation>;
 
@@ -43,6 +43,8 @@ pub trait AllocationsStorage: Sync + Send {
     fn dump<'a>(&'a self) -> Box<dyn Iterator<Item = &Allocation> + 'a>;
 
     fn clear(&mut self);
+
+    fn count(&self) -> usize;
 }
 
 pub struct StorageImpl {
@@ -62,8 +64,12 @@ impl AllocationsStorage for StorageImpl {
         self.map.insert(allocation.base_address, allocation);
     }
 
-    fn remove(&mut self, address: Address) {
-        self.map.remove(&address);
+    fn remove(&mut self, address: Address) -> Result<(), ()> {
+        if self.map.remove(&address).is_some() {
+            Ok(())
+        } else {
+            Err(())
+        }
     }
 
     fn find(&self, address: Address) -> Option<&Allocation> {
@@ -92,5 +98,9 @@ impl AllocationsStorage for StorageImpl {
 
     fn clear(&mut self) {
         self.map.clear();
+    }
+
+    fn count(&self) -> usize {
+        self.map.len()
     }
 }

@@ -8,4 +8,6 @@ pub enum PacketId {
     GetConfiguration = 3,
     ClearStorage = 4,
     Find = 5,
+    GetStatistics = 6,
+    ResetStatistics = 7,
 }

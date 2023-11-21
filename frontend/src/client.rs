@@ -50,6 +50,18 @@ impl RequestSpec for proto::FindRequest {
     type RESPONSE = proto::FindResponse;
 }
 
+impl RequestSpec for proto::GetStatisticsRequest {
+    const PACKET_ID: PacketId = PacketId::GetStatistics;
+
+    type RESPONSE = proto::GetStatisticsResponse;
+}
+
+impl RequestSpec for proto::ResetStatisticsRequest {
+    const PACKET_ID: PacketId = PacketId::ResetStatistics;
+
+    type RESPONSE = proto::ResetStatisticsResponse;
+}
+
 pub struct Client {
     transport: Box<dyn Transport>,
 }

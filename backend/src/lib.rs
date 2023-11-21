@@ -37,6 +37,8 @@ pub struct MyServer {
 
 impl RequestHandler for MyServer {
     fn handle_request(&self, mut packet: Bytes) -> io::Result<Bytes> {
+        assert!(unsafe { detour::lock() }.is_acquired());
+
         let packet_id_num = packet[0];
         let packet_id = PacketId::try_from_primitive(packet_id_num)
             .map_err(|_| io::Error::from(io::ErrorKind::ConnectionReset))?;
@@ -51,8 +53,7 @@ impl MyServer {
     }
 
     fn handle_find(&self, req: proto::FindRequest) -> Vec<proto::FoundAllocation> {
-        let _ack = self.state.acquire_all();
-        let storage = self.state.get_storage();
+        let storage = self.state.lock_storage();
 
         let find_record = |record: &proto::FindRecord| {
             let allocations = if let Some(filter) = record.filter.as_ref() {
@@ -117,10 +118,7 @@ impl MyServer {
             PacketId::ClearStorage => {
                 let _req = proto::ClearStorageRequest::decode(data).ok()?;
 
-                {
-                    let _a = self.state.acquire_all();
-                    self.state.get_storage().clear();
-                }
+                self.state.lock_storage().clear();
 
                 proto::ClearStorageResponse {}.encode(&mut response).ok()?;
             }
@@ -132,6 +130,34 @@ impl MyServer {
                 }
                 .encode(&mut response)
                 .ok()?;
+            }
+            PacketId::GetStatistics => {
+                let _req = proto::GetStatisticsRequest::decode(data).ok()?;
+
+                let statistics = (**self.state.lock_statistics()).clone();
+                let allocated = self.state.lock_storage().count();
+
+                proto::GetStatisticsResponse {
+                    statistics: Some(proto::Statistics {
+                        total_allocations: statistics.total_allocations as u64,
+                        total_deallocations: statistics.total_deallocations as u64,
+                        total_deallocations_non_allocated: statistics
+                            .total_deallocations_non_allocated
+                            as u64,
+                        allocated: allocated as u64,
+                    }),
+                }
+                .encode(&mut response)
+                .ok()?;
+            }
+            PacketId::ResetStatistics => {
+                let _req = proto::ResetStatisticsRequest::decode(data).ok()?;
+
+                self.state.lock_statistics().reset();
+
+                proto::ResetStatisticsResponse {}
+                    .encode(&mut response)
+                    .ok()?;
             }
         }
 
@@ -172,7 +198,22 @@ fn initialize_detour(state: StateRef) {
     }
 }
 
+pub fn spawn_thread<F, T>(f: F) -> std::thread::JoinHandle<T>
+where
+    F: FnOnce() -> T,
+    F: Send + 'static,
+    T: Send + 'static,
+{
+    // Disable detour calls for this thread.
+    unsafe { detour::lock() }.acquire_all().forget();
+
+    std::thread::spawn(f)
+}
+
 fn initialize() {
+    // REQUIRED: initializes the detour lock.
+    let _ack = unsafe { detour::lock() }.acquire_all();
+
     initialize_panic_handler();
 
     debug_message!("Initialize");
@@ -187,7 +228,9 @@ fn initialize() {
 
     let server = make_static!(MyServer::new(state));
 
-    std::thread::spawn(|| serve_tcp(&SocketAddr::from(([0, 0, 0, 0], 9940)), server));
+    spawn_thread(move || {
+        serve_tcp(&SocketAddr::from(([0, 0, 0, 0], 9940)), server).unwrap();
+    });
 }
 
 fn deinitialize() {

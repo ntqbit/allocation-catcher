@@ -10,6 +10,8 @@ use winapi::{
     um::libloaderapi::{GetProcAddress, LoadLibraryA},
 };
 
+use super::{lock, Slot};
+
 use super::{allocation_handler, Allocation, Deallocation, Error};
 
 static_detour! {
@@ -32,15 +34,17 @@ static mut INITIAILIZED: AtomicBool = AtomicBool::new(false);
 fn RtlAllocateHeapDetour(HeapHandle: PVOID, Flags: ULONG, Size: SIZE_T) -> PVOID {
     let base_address = RtlAllocateHeapHook.call(HeapHandle, Flags, Size);
 
-    unsafe { allocation_handler() }.on_allocation(Allocation {
-        heap_handle: HeapHandle as usize,
-        size: Size as usize,
-        allocated_base_address: if base_address.is_null() {
-            None
-        } else {
-            Some(base_address as usize)
-        },
-    });
+    if let Some(_guard) = unsafe { lock() }.acquire_slot(Slot::Alloc) {
+        unsafe { allocation_handler() }.on_allocation(Allocation {
+            heap_handle: HeapHandle as usize,
+            size: Size as usize,
+            allocated_base_address: if base_address.is_null() {
+                None
+            } else {
+                Some(base_address as usize)
+            },
+        });
+    }
 
     base_address
 }
@@ -49,11 +53,13 @@ fn RtlAllocateHeapDetour(HeapHandle: PVOID, Flags: ULONG, Size: SIZE_T) -> PVOID
 fn RtlFreeHeapDetour(HeapHandle: PVOID, Flags: ULONG, BaseAddress: PVOID) -> BOOL {
     let success = RtlFreeHeapHook.call(HeapHandle, Flags, BaseAddress);
 
-    unsafe { allocation_handler() }.on_deallocation(Deallocation {
-        heap_handle: HeapHandle as usize,
-        base_address: BaseAddress as usize,
-        success: success != 0,
-    });
+    if let Some(_guard) = unsafe { lock() }.acquire_slot(Slot::Free) {
+        unsafe { allocation_handler() }.on_deallocation(Deallocation {
+            heap_handle: HeapHandle as usize,
+            base_address: BaseAddress as usize,
+            success: success != 0,
+        });
+    }
 
     success
 }

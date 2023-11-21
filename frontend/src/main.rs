@@ -3,6 +3,7 @@ mod transport;
 
 use std::{io, net::SocketAddr};
 
+use anyhow::anyhow;
 use clap::{arg, error::ErrorKind, ArgMatches, Command};
 
 use client::{proto, Client, RequestSpec};
@@ -17,7 +18,7 @@ pub fn send_request<T: RequestSpec>(msg: T) -> io::Result<T::RESPONSE> {
     Ok(<T::RESPONSE as prost::Message>::decode(response_bytes)?)
 }
 
-fn ping() -> io::Result<()> {
+fn ping() -> anyhow::Result<()> {
     let challenge = rand::random();
     let req = proto::PingRequest { num: challenge };
     let ping_response = send_request(req)?;
@@ -29,13 +30,13 @@ fn ping() -> io::Result<()> {
     Ok(())
 }
 
-fn clear() -> io::Result<()> {
+fn clear() -> anyhow::Result<()> {
     send_request(proto::ClearStorageRequest {})?;
     println!("Done!");
     Ok(())
 }
 
-fn setcfg() -> io::Result<()> {
+fn setcfg() -> anyhow::Result<()> {
     send_request(proto::SetConfigurationRequest {
         configuration: Some(proto::Configuration {
             stack_trace_offset: 0x10,
@@ -46,13 +47,13 @@ fn setcfg() -> io::Result<()> {
     Ok(())
 }
 
-fn getcfg() -> io::Result<()> {
+fn getcfg() -> anyhow::Result<()> {
     let resp = send_request(proto::GetConfigurationRequest {})?;
     println!("Configuration: {:#?}", resp.configuration);
     Ok(())
 }
 
-fn dump() -> io::Result<()> {
+fn dump() -> anyhow::Result<()> {
     let resp = send_request(proto::FindRequest {
         records: vec![proto::FindRecord {
             id: 0,
@@ -84,7 +85,7 @@ fn print_allocations(allocations: &Vec<proto::Allocation>) {
     }
 }
 
-fn find(arg: &ArgMatches) -> io::Result<()> {
+fn find(arg: &ArgMatches) -> anyhow::Result<()> {
     let address = *arg.get_one::<u64>("address").unwrap();
     println!("Address: 0x{address:X}");
 
@@ -144,6 +145,22 @@ fn findrange(cmd: &mut Command, arg: &ArgMatches) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn getstat() -> anyhow::Result<()> {
+    let resp = send_request(proto::GetStatisticsRequest {})?;
+    if let Some(statistics) = resp.statistics.as_ref() {
+        println!("Statistics: {:#?}", statistics);
+        Ok(())
+    } else {
+        Err(anyhow!("no statistics field present"))
+    }
+}
+
+fn resetstat() -> anyhow::Result<()> {
+    send_request(proto::ResetStatisticsRequest {})?;
+    println!("Done!");
+    Ok(())
+}
+
 fn run(mut cmd: Command) -> anyhow::Result<()> {
     match cmd.get_matches_mut().subcommand().unwrap() {
         ("ping", _) => ping()?,
@@ -153,6 +170,8 @@ fn run(mut cmd: Command) -> anyhow::Result<()> {
         ("dump", _) => dump()?,
         ("find", sub) => find(sub)?,
         ("findrange", sub) => findrange(&mut cmd, sub)?,
+        ("getstat", _) => getstat()?,
+        ("resetstat", _) => resetstat()?,
         _ => unreachable!(),
     }
 
@@ -190,6 +209,8 @@ fn cli() -> Command {
                 .arg(arg!(<lower> "Lower bound").value_parser(parse_hex_address))
                 .arg(arg!(<upper> "Upper bound").value_parser(parse_hex_address)),
         )
+        .subcommand(Command::new("getstat").about("Get statistics"))
+        .subcommand(Command::new("resetstat").about("Reset statistics"))
 }
 
 fn main() {

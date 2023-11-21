@@ -1,6 +1,6 @@
 use std::sync::{Mutex, MutexGuard};
 
-use crate::{allocations_storage::AllocationsStorage, platform::TlsSlotAcquisition, proto};
+use crate::{allocations_storage::AllocationsStorage, proto};
 
 #[derive(Debug, Clone)]
 pub struct Configuration {
@@ -37,35 +37,23 @@ impl From<Configuration> for proto::Configuration {
 
 pub type StateRef = &'static State;
 
-#[repr(usize)]
-pub enum Slot {
-    Alloc = 0,
-    Free = 1,
+#[derive(Debug, Default, Clone)]
+pub struct Statistics {
+    pub total_allocations: usize,
+    pub total_deallocations: usize,
+    pub total_deallocations_non_allocated: usize,
+}
+
+impl Statistics {
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
 }
 
 pub struct State {
     configuration: Mutex<Configuration>,
     storage: Mutex<Box<dyn AllocationsStorage>>,
-    tls_slot_acquisition: TlsSlotAcquisition,
-}
-
-pub struct AcquisitionGuard<'a> {
-    tls: &'a TlsSlotAcquisition,
-    acquisition: usize,
-}
-
-impl<'a> AcquisitionGuard<'a> {
-    pub const fn new(tls: &'a TlsSlotAcquisition, acquisition: usize) -> Self {
-        Self { tls, acquisition }
-    }
-}
-
-impl<'a> Drop for AcquisitionGuard<'a> {
-    fn drop(&mut self) {
-        unsafe {
-            self.tls.release(self.acquisition);
-        }
-    }
+    statistics: Mutex<Box<Statistics>>,
 }
 
 impl State {
@@ -73,31 +61,8 @@ impl State {
         Self {
             configuration: Mutex::new(configuration),
             storage: Mutex::new(storage),
-            tls_slot_acquisition: unsafe {
-                TlsSlotAcquisition::new().expect("failed to allocate tls slot")
-            },
+            statistics: Mutex::new(Box::new(Statistics::default())),
         }
-    }
-
-    // Methods for preventing recursive detour call.
-    pub fn acquire_slot(&self, slot: Slot) -> Option<AcquisitionGuard> {
-        let mask = 1 << (slot as usize);
-        let acquisition = unsafe { self.tls_slot_acquisition.acquire(mask) };
-
-        if acquisition != 0 {
-            Some(AcquisitionGuard::new(
-                &self.tls_slot_acquisition,
-                acquisition,
-            ))
-        } else {
-            None
-        }
-    }
-
-    pub fn acquire_all(&self) -> AcquisitionGuard {
-        AcquisitionGuard::new(&self.tls_slot_acquisition, unsafe {
-            self.tls_slot_acquisition.acquire(!0)
-        })
     }
 
     pub fn set_configuration(&self, configuration: Configuration) {
@@ -114,7 +79,13 @@ impl State {
             .clone()
     }
 
-    pub fn get_storage(&self) -> MutexGuard<'_, Box<dyn AllocationsStorage>> {
+    pub fn lock_storage(&self) -> MutexGuard<'_, Box<dyn AllocationsStorage>> {
         self.storage.lock().expect("unexpected storage lock poison")
+    }
+
+    pub fn lock_statistics(&self) -> MutexGuard<'_, Box<Statistics>> {
+        self.statistics
+            .lock()
+            .expect("unexpected statistics lock poison")
     }
 }
