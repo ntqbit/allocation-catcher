@@ -4,7 +4,6 @@ use std::{
 };
 
 use bytes::{Bytes, BytesMut};
-use interprocess::local_socket::{LocalSocketStream, ToLocalSocketName};
 
 pub fn stream_request<S: Read + Write>(stream: &mut S, packet: Bytes) -> io::Result<Bytes> {
     stream.write(&(packet.len() as u16).to_be_bytes())?;
@@ -18,10 +17,6 @@ pub fn stream_request<S: Read + Write>(stream: &mut S, packet: Bytes) -> io::Res
     stream.read_exact(&mut response)?;
 
     Ok(response.freeze())
-}
-
-pub fn connect_ipc<'a>(name: impl ToLocalSocketName<'a>) -> io::Result<LocalSocketStream> {
-    LocalSocketStream::connect(name)
 }
 
 pub fn connect_tcp(addrs: impl ToSocketAddrs) -> io::Result<TcpStream> {

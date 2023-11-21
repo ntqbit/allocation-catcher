@@ -4,7 +4,6 @@ use std::{
 };
 
 use bytes::BytesMut;
-use interprocess::local_socket::{LocalSocketListener, LocalSocketStream, ToLocalSocketName};
 
 use crate::{server::RequestHandler, spawn_thread};
 
@@ -52,14 +51,6 @@ impl TransportListener for TcpListener {
     }
 }
 
-impl TransportListener for LocalSocketListener {
-    type Stream = LocalSocketStream;
-
-    fn accept(&self) -> io::Result<Self::Stream> {
-        LocalSocketListener::accept(&self)
-    }
-}
-
 pub fn serve_stream<T: TransportListener>(
     transport: T,
     request_handler: &'static dyn RequestHandler,
@@ -77,11 +68,4 @@ pub fn serve_tcp(
     request_handler: &'static dyn RequestHandler,
 ) -> io::Result<()> {
     serve_stream(TcpListener::bind(addr)?, request_handler)
-}
-
-pub fn serve_ipc<'a>(
-    name: impl ToLocalSocketName<'a>,
-    request_handler: &'static dyn RequestHandler,
-) -> io::Result<()> {
-    serve_stream(LocalSocketListener::bind(name)?, request_handler)
 }
