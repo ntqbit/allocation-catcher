@@ -10,7 +10,7 @@ mod platform;
 mod server;
 mod state;
 
-use std::{ffi::CString, io, iter, net::SocketAddr};
+use std::{io, iter, net::SocketAddr};
 
 use crate::{
     allocation_handler::AllocationHandlerImpl,
@@ -23,13 +23,6 @@ use bytes::{Bytes, BytesMut};
 use num_enum::TryFromPrimitive;
 use prost::Message;
 use static_cell::make_static;
-use winapi::{
-    shared::minwindef::{BOOL, HINSTANCE},
-    um::{
-        winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH},
-        winuser::MessageBoxA,
-    },
-};
 
 pub struct MyServer {
     state: StateRef,
@@ -166,22 +159,7 @@ impl MyServer {
 }
 
 fn initialize_panic_handler() {
-    std::panic::set_hook(Box::new(|panic_info| {
-        if let Ok(cstring) = CString::new(panic_info.to_string()) {
-            unsafe {
-                MessageBoxA(0 as _, cstring.as_ptr() as _, b"PANIC\0".as_ptr() as _, 0);
-            }
-        } else {
-            unsafe {
-                MessageBoxA(
-                    0 as _,
-                    b"panic info contained a nul byte\0".as_ptr() as _,
-                    b"PANIC\0".as_ptr() as _,
-                    0,
-                );
-            }
-        }
-    }));
+    std::panic::set_hook(Box::new(|panic_info| platform::handle_panic(panic_info)));
 }
 
 fn initialize_detour(state: StateRef) {
@@ -238,20 +216,4 @@ fn deinitialize() {
         detour::disable().expect("detour disable failed");
         detour::uninitialize().expect("detour uninitialize failed");
     }
-}
-
-#[no_mangle]
-#[allow(non_snake_case)]
-pub extern "system" fn DllMain(
-    _module: HINSTANCE,
-    reason: u32,
-    _reserved: *mut winapi::ctypes::c_void,
-) -> BOOL {
-    match reason {
-        DLL_PROCESS_ATTACH => initialize(),
-        DLL_PROCESS_DETACH => deinitialize(),
-        _ => {}
-    }
-
-    1
 }
