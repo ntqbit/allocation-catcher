@@ -7,7 +7,6 @@ edition = "2021"
 heapless = "0.8.0"
 lazy_static = "1.4.0"
 retour = { version = "0.3.1", features = ["nightly", "static-detour"] }
-static_cell = { version = "2.0.0", features = ["nightly"] }
 winapi = { version = "0.3.9", features = [
     "winuser",
     "libloaderapi",
@@ -17,8 +16,7 @@ winapi = { version = "0.3.9", features = [
     "debugapi",
 ] }
 
-bytes = { workspace = true }
-common = { workspace = true }
-num_enum = { workspace = true }
-prost = { workspace = true }
 backtrace = { version = "0.3.69", path = "../backtrace" }
+static_cell = { workspace = true }
+
+common = { workspace = true }

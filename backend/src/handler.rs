@@ -1,20 +1,24 @@
 use crate::{
-    allocations_storage::{Allocation, BackTrace, BackTraceFrame, BackTraceSymbol, StackTrace},
     detour,
-    state::{Configuration, StateRef},
+    state::StateRef,
+    storage::{Allocation, BackTrace, BackTraceFrame, BackTraceSymbol, StackTrace},
 };
 
-pub struct AllocationHandlerImpl {
+pub struct StorageAllocationHandler {
     state: StateRef,
 }
 
-impl AllocationHandlerImpl {
+impl StorageAllocationHandler {
     pub const fn new(state: StateRef) -> Self {
         Self { state }
     }
 }
 
-fn back_trace(skip: u32, count: u32, resolve_symbols_count: u32) -> BackTrace {
+fn create_back_trace(skip: usize, count: usize, resolve_symbols_count: usize) -> Option<BackTrace> {
+    if count == 0 {
+        return None;
+    }
+
     let mut bt = BackTrace {
         frames: Vec::with_capacity(20),
     };
@@ -27,7 +31,7 @@ fn back_trace(skip: u32, count: u32, resolve_symbols_count: u32) -> BackTrace {
                 let mut s = Vec::with_capacity(3);
 
                 backtrace::resolve_frame(frame, |symbol| {
-                    if s.len() < (resolve_symbols_count as usize) {
+                    if s.len() < resolve_symbols_count {
                         s.push(BackTraceSymbol {
                             name: symbol.name().and_then(|x| x.as_str().map(|y| y.to_owned())),
                             address: symbol.addr().map(|x| x as usize),
@@ -50,26 +54,14 @@ fn back_trace(skip: u32, count: u32, resolve_symbols_count: u32) -> BackTrace {
 
         cnt += 1;
 
-        bt.frames.len() < (count as usize)
+        bt.frames.len() < count
     });
 
-    bt
+    Some(bt)
 }
 
-fn create_back_trace(configuration: &Configuration) -> Option<BackTrace> {
-    if configuration.backtrace_frames_count > 0 {
-        Some(back_trace(
-            configuration.backtrace_frames_skip,
-            configuration.backtrace_frames_count,
-            configuration.backtrace_resolve_symbols_count,
-        ))
-    } else {
-        None
-    }
-}
-
-fn create_stack_trace(configuration: &Configuration) -> Option<StackTrace> {
-    if configuration.stack_trace_size == 0 {
+fn create_stack_trace(size: usize, offset: usize) -> Option<StackTrace> {
+    if size == 0 {
         return None;
     }
 
@@ -81,10 +73,8 @@ fn create_stack_trace(configuration: &Configuration) -> Option<StackTrace> {
     });
 
     if let Some(base) = base {
-        let address = base + (crate::wordsize() as usize) * configuration.stack_trace_offset;
-        let slice = unsafe {
-            core::slice::from_raw_parts(address as *const usize, configuration.stack_trace_size)
-        };
+        let address = base + (crate::wordsize() as usize) * offset;
+        let slice = unsafe { core::slice::from_raw_parts(address as *const usize, size) };
 
         Some(StackTrace {
             base: address,
@@ -95,12 +85,19 @@ fn create_stack_trace(configuration: &Configuration) -> Option<StackTrace> {
     }
 }
 
-impl detour::AllocationHandler for AllocationHandlerImpl {
+impl detour::AllocationHandler for StorageAllocationHandler {
     fn on_allocation(&self, allocation: crate::detour::Allocation) {
         if let Some(base_address) = allocation.allocated_base_address {
             let configuration = self.state.get_configuration();
-            let stack_trace = create_stack_trace(&configuration);
-            let back_trace = create_back_trace(&configuration);
+            let stack_trace = create_stack_trace(
+                configuration.stack_trace_size,
+                configuration.stack_trace_offset,
+            );
+            let back_trace = create_back_trace(
+                configuration.backtrace_frames_skip as usize,
+                configuration.backtrace_frames_count as usize,
+                configuration.backtrace_resolve_symbols_count as usize,
+            );
 
             self.state.lock_storage().store(Allocation {
                 base_address,
@@ -114,6 +111,39 @@ impl detour::AllocationHandler for AllocationHandlerImpl {
                 // Update statistics
                 let mut stats = self.state.lock_statistics();
                 stats.total_allocations += 1;
+            }
+        }
+    }
+
+    fn on_reallocation(&self, reallocation: detour::Reallocation) {
+        if let Some(base_address) = reallocation.allocated_base_address {
+            let configuration = self.state.get_configuration();
+            let stack_trace = create_stack_trace(
+                configuration.stack_trace_size,
+                configuration.stack_trace_offset,
+            );
+            let back_trace = create_back_trace(
+                configuration.backtrace_frames_skip as usize,
+                configuration.backtrace_frames_count as usize,
+                configuration.backtrace_resolve_symbols_count as usize,
+            );
+
+            {
+                let mut storage = self.state.lock_storage();
+                storage.remove(reallocation.base_address).ok();
+                storage.store(Allocation {
+                    base_address,
+                    size: reallocation.size,
+                    heap_handle: reallocation.heap_handle,
+                    stack_trace,
+                    back_trace,
+                });
+            }
+
+            {
+                // Update statistics
+                let mut stats = self.state.lock_statistics();
+                stats.total_reallocations += 1;
             }
         }
     }
@@ -133,32 +163,6 @@ impl detour::AllocationHandler for AllocationHandlerImpl {
                 if !removed {
                     stats.total_deallocations_non_allocated += 1;
                 }
-            }
-        }
-    }
-
-    fn on_reallocation(&self, reallocation: detour::Reallocation) {
-        if let Some(base_address) = reallocation.allocated_base_address {
-            let configuration = self.state.get_configuration();
-            let stack_trace = create_stack_trace(&configuration);
-            let back_trace = create_back_trace(&configuration);
-
-            {
-                let mut storage = self.state.lock_storage();
-                storage.remove(reallocation.base_address).ok();
-                storage.store(Allocation {
-                    base_address,
-                    size: reallocation.size,
-                    heap_handle: reallocation.heap_handle,
-                    stack_trace,
-                    back_trace,
-                });
-            }
-
-            {
-                // Update statistics
-                let mut stats = self.state.lock_statistics();
-                stats.total_reallocations += 1;
             }
         }
     }

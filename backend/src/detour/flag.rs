@@ -75,6 +75,7 @@ impl DetourFlagSet {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_acquired(&self, flag: impl Into<usize>) -> bool {
         self.tls_slot_acquisition.get() & (1 << flag.into()) != 0
     }

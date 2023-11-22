@@ -1,0 +1,12 @@
+[package]
+name = "allocation-catcher-backend-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bytes = { workspace = true }
+common = { workspace = true }
+num_enum = { workspace = true }
+prost = { workspace = true }
+
+allocation-catcher-backend = { path = "../backend" }

@@ -2,6 +2,7 @@ use std::{ffi::CStr, fmt::Write};
 
 use winapi::um::{debugapi::OutputDebugStringA, processthreadsapi::GetCurrentThreadId};
 
+#[allow(dead_code)]
 pub fn debug_message_fmt(args: core::fmt::Arguments) {
     let thread_id = unsafe { GetCurrentThreadId() };
 

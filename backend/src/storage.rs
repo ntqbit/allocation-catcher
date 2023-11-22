@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::ops::Bound::{Excluded, Included};
 
-use crate::server::proto;
+use common::proto;
 
 pub type Address = usize;
 pub type HeapHandle = usize;
@@ -110,11 +110,11 @@ pub trait AllocationsStorage: Sync + Send {
     fn count(&self) -> usize;
 }
 
-pub struct StorageImpl {
+pub struct BtreeMapStorage {
     map: BTreeMap<Address, Allocation>,
 }
 
-impl StorageImpl {
+impl BtreeMapStorage {
     pub const fn new() -> Self {
         Self {
             map: BTreeMap::new(),
@@ -122,7 +122,7 @@ impl StorageImpl {
     }
 }
 
-impl AllocationsStorage for StorageImpl {
+impl AllocationsStorage for BtreeMapStorage {
     fn store(&mut self, allocation: Allocation) {
         self.map.insert(allocation.base_address, allocation);
     }

@@ -31,15 +31,23 @@ name = "allocation-catcher-backend"
 version = "0.1.0"
 dependencies = [
  "backtrace",
- "bytes",
  "common",
  "heapless",
  "lazy_static",
- "num_enum",
- "prost",
  "retour",
  "static_cell",
  "winapi",
+]
+
+[[package]]
+name = "allocation-catcher-backend-server"
+version = "0.1.0"
+dependencies = [
+ "allocation-catcher-backend",
+ "bytes",
+ "common",
+ "num_enum",
+ "prost",
 ]
 
 [[package]]
@@ -47,6 +55,8 @@ name = "allocation-catcher-dylib"
 version = "0.1.0"
 dependencies = [
  "allocation-catcher-backend",
+ "allocation-catcher-backend-server",
+ "static_cell",
  "winapi",
 ]
 

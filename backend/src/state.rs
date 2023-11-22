@@ -1,6 +1,8 @@
 use std::sync::{Mutex, MutexGuard};
 
-use crate::{allocations_storage::AllocationsStorage, proto};
+use common::proto;
+
+use crate::storage::AllocationsStorage;
 
 #[derive(Debug, Clone)]
 pub struct Configuration {
@@ -47,8 +49,6 @@ impl From<Configuration> for proto::Configuration {
     }
 }
 
-pub type StateRef = &'static State;
-
 #[derive(Debug, Default, Clone)]
 pub struct Statistics {
     pub total_allocations: usize,
@@ -62,6 +62,8 @@ impl Statistics {
         *self = Self::default();
     }
 }
+
+pub type StateRef = &'static State;
 
 pub struct State {
     configuration: Mutex<Configuration>,
