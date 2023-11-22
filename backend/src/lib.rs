@@ -1,6 +1,4 @@
 #![feature(type_alias_impl_trait)]
-#![feature(btreemap_alloc)]
-#![feature(allocator_api)]
 
 mod allocation_handler;
 mod allocations_storage;

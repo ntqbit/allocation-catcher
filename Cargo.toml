@@ -1,5 +1,5 @@
 [workspace]
-members = ["backend", "dylib", "frontend", "common"]
+members = ["backend", "dylib", "frontend", "common", "backtrace"]
 resolver = "2"
 
 [workspace.dependencies]

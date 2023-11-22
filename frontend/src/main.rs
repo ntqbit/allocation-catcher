@@ -76,6 +76,31 @@ fn print_allocation(allocation: &proto::Allocation) {
         "Allocation: [base=0x{:X},size=0x{:X}({})]",
         allocation.base_address, allocation.size, allocation.size
     );
+    if let Some(stacktrace) = allocation.stack_trace.as_ref() {
+        println!("Stack trace: {:X?}", stacktrace.trace);
+    }
+    if let Some(backtrace) = allocation.back_trace.as_ref() {
+        println!("Back trace: ");
+        for frame in backtrace.frames.iter() {
+            println!(
+                " - ip: {:X}, sp: {:X} mod: {:X}. sym: {}",
+                frame.instruction_pointer,
+                frame.stack_pointer,
+                frame.module_base.unwrap_or_default(),
+                {
+                    if let Some(sym) = frame.resolved_symbols.first() {
+                        format!(
+                            "{} @  0x{:X}",
+                            sym.name.as_ref().unwrap_or(&"".to_owned()),
+                            sym.address.unwrap_or_default()
+                        )
+                    } else {
+                        "-".to_owned()
+                    }
+                }
+            );
+        }
+    }
 }
 
 fn print_allocations(allocations: &Vec<proto::Allocation>) {

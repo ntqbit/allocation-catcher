@@ -21,4 +21,4 @@ bytes = { workspace = true }
 common = { workspace = true }
 num_enum = { workspace = true }
 prost = { workspace = true }
-backtrace = "0.3.69"
+backtrace = { version = "0.3.69", path = "../backtrace" }
