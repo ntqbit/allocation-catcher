@@ -15,21 +15,28 @@ pub enum Error {
 
 pub type HeapHandle = usize;
 
-pub struct Allocation {
+pub struct Base {
     pub heap_handle: HeapHandle,
+
+    // Used for stack tracing and back tracing to avoid tracing the handler functions.
+    pub return_address: Option<usize>,
+    pub address_of_return_address: Option<usize>,
+    pub stack_frame_address: Option<usize>,
+}
+
+pub struct Allocation {
+    pub base: Base,
     pub size: usize,
     pub allocated_base_address: Option<usize>,
 }
 
 pub struct Reallocation {
-    pub heap_handle: HeapHandle,
     pub base_address: usize,
-    pub size: usize,
-    pub allocated_base_address: Option<usize>,
+    pub allocation: Allocation,
 }
 
 pub struct Deallocation {
-    pub heap_handle: HeapHandle,
+    pub base: Base,
     pub base_address: usize,
     pub success: bool,
 }

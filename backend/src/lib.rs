@@ -1,4 +1,7 @@
 #![feature(type_alias_impl_trait)]
+#![feature(link_llvm_intrinsics)]
+
+#![allow(internal_features)]
 
 mod debug;
 mod detour;

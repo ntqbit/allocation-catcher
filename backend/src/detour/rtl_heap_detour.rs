@@ -12,7 +12,7 @@ use winapi::{
 };
 
 use super::{
-    allocation_handler, flag_set, Allocation, Deallocation, DetourFlag, Error, Reallocation,
+    allocation_handler, flag_set, Allocation, Base, Deallocation, DetourFlag, Error, Reallocation,
 };
 
 static_detour! {
@@ -36,6 +36,7 @@ static_detour! {
     ) -> BOOL;
 }
 
+#[inline(always)]
 fn handle_detour<T: Copy>(
     flags: ULONG,
     forward: impl FnOnce(ULONG) -> T,
@@ -58,14 +59,38 @@ fn handle_detour<T: Copy>(
     result
 }
 
+extern "C" {
+    #[link_name = "llvm.returnaddress"]
+    fn return_address(a: i32) -> *const u8;
+
+    #[link_name = "llvm.addressofreturnaddress"]
+    fn addressofreturnaddress() -> *const u8;
+
+    #[link_name = "llvm.frameaddress"]
+    fn frame_address(a: i32) -> *const u8;
+}
+
+macro_rules! heap_base {
+    ($heap_handle:ident) => {
+        Base {
+            heap_handle: $heap_handle as usize,
+            return_address: unsafe { Some(return_address(0) as usize) },
+            address_of_return_address: unsafe { Some(addressofreturnaddress() as usize) },
+            stack_frame_address: unsafe { Some(frame_address(0) as usize) },
+        }
+    };
+}
+
 #[allow(non_snake_case)]
 fn RtlAllocateHeapDetour(HeapHandle: PVOID, Flags: ULONG, Size: SIZE_T) -> PVOID {
+    let base = heap_base!(HeapHandle);
+
     handle_detour(
         Flags,
         |flags| RtlAllocateHeapHook.call(HeapHandle, flags, Size),
         |base_address| {
             unsafe { allocation_handler() }.on_allocation(Allocation {
-                heap_handle: HeapHandle as usize,
+                base,
                 size: Size as usize,
                 allocated_base_address: if base_address.is_null() {
                     None
@@ -84,18 +109,22 @@ fn RtlReAllocateHeapDetour(
     BaseAddress: PVOID,
     Size: SIZE_T,
 ) -> PVOID {
+    let base = heap_base!(HeapHandle);
+
     handle_detour(
         Flags,
         |flags| RtlReAllocateHeapHook.call(HeapHandle, flags, BaseAddress, Size),
         |base_address| {
             unsafe { allocation_handler() }.on_reallocation(Reallocation {
-                heap_handle: HeapHandle as usize,
-                size: Size as usize,
                 base_address: BaseAddress as usize,
-                allocated_base_address: if base_address.is_null() {
-                    None
-                } else {
-                    Some(base_address as usize)
+                allocation: Allocation {
+                    base,
+                    size: Size as usize,
+                    allocated_base_address: if base_address.is_null() {
+                        None
+                    } else {
+                        Some(base_address as usize)
+                    },
                 },
             });
         },
@@ -104,12 +133,14 @@ fn RtlReAllocateHeapDetour(
 
 #[allow(non_snake_case)]
 fn RtlFreeHeapDetour(HeapHandle: PVOID, Flags: ULONG, BaseAddress: PVOID) -> BOOL {
+    let base = heap_base!(HeapHandle);
+
     handle_detour(
         Flags,
         |flags| RtlFreeHeapHook.call(HeapHandle, flags, BaseAddress),
         |success| {
             unsafe { allocation_handler() }.on_deallocation(Deallocation {
-                heap_handle: HeapHandle as usize,
+                base,
                 base_address: BaseAddress as usize,
                 success: success != 0,
             });
