@@ -1,27 +1,41 @@
 mod client;
 mod transport;
 
-use std::{io, net::SocketAddr};
+use std::{
+    io,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    str::FromStr,
+};
 
 use anyhow::anyhow;
 use clap::{arg, error::ErrorKind, value_parser, ArgMatches, Command};
 
-use client::{proto, Client, RequestSpec};
+use client::{proto, Client as TransportClient, RequestSpec};
 
-pub fn send_request<T: RequestSpec>(msg: T) -> io::Result<T::RESPONSE> {
-    let transport = Box::new(
-        transport::connect_tcp(&SocketAddr::from(([127, 0, 0, 1], 9940)))
-            .map_err(|_| io::Error::from(io::ErrorKind::ConnectionRefused))?,
-    );
-    let mut client = Client::new(transport);
-    let response_bytes = client.request(T::PACKET_ID, msg.encode_to_vec().into())?;
-    Ok(<T::RESPONSE as prost::Message>::decode(response_bytes)?)
+pub struct Client {
+    endpoint: SocketAddr,
 }
 
-fn ping() -> anyhow::Result<()> {
+impl Client {
+    pub fn new(endpoint: SocketAddr) -> Self {
+        Self { endpoint }
+    }
+
+    pub fn send_request<T: RequestSpec>(&self, msg: T) -> io::Result<T::RESPONSE> {
+        let transport = Box::new(
+            transport::connect_tcp(self.endpoint)
+                .map_err(|_| io::Error::from(io::ErrorKind::ConnectionRefused))?,
+        );
+        let mut client = TransportClient::new(transport);
+        let response_bytes = client.request(T::PACKET_ID, msg.encode_to_vec().into())?;
+        Ok(<T::RESPONSE as prost::Message>::decode(response_bytes)?)
+    }
+}
+
+fn ping(client: &Client) -> anyhow::Result<()> {
     let challenge = rand::random();
     let req = proto::PingRequest { num: challenge };
-    let ping_response = send_request(req)?;
+    let ping_response = client.send_request(req)?;
     if ping_response.num == challenge {
         println!("Ping-pong! Version: {}", ping_response.version);
     } else {
@@ -30,14 +44,14 @@ fn ping() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn clear() -> anyhow::Result<()> {
-    send_request(proto::ClearStorageRequest {})?;
+fn clear(client: &Client) -> anyhow::Result<()> {
+    client.send_request(proto::ClearStorageRequest {})?;
     println!("Done!");
     Ok(())
 }
 
-fn setcfg(_cmd: &mut Command, sub: &ArgMatches) -> anyhow::Result<()> {
-    send_request(proto::SetConfigurationRequest {
+fn setcfg(_cmd: &mut Command, sub: &ArgMatches, client: &Client) -> anyhow::Result<()> {
+    client.send_request(proto::SetConfigurationRequest {
         configuration: Some(proto::Configuration {
             stack_trace_offset: *sub.get_one("stoff").unwrap(),
             stack_trace_size: *sub.get_one("stsize").unwrap(),
@@ -50,14 +64,14 @@ fn setcfg(_cmd: &mut Command, sub: &ArgMatches) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn getcfg() -> anyhow::Result<()> {
-    let resp = send_request(proto::GetConfigurationRequest {})?;
+fn getcfg(client: &Client) -> anyhow::Result<()> {
+    let resp = client.send_request(proto::GetConfigurationRequest {})?;
     println!("Configuration: {:#?}", resp.configuration);
     Ok(())
 }
 
-fn dump() -> anyhow::Result<()> {
-    let resp = send_request(proto::FindRequest {
+fn dump(client: &Client) -> anyhow::Result<()> {
+    let resp = client.send_request(proto::FindRequest {
         records: vec![proto::FindRecord {
             id: 0,
             filter: None,
@@ -113,11 +127,11 @@ fn print_allocations(allocations: &Vec<proto::Allocation>) {
     }
 }
 
-fn find(arg: &ArgMatches) -> anyhow::Result<()> {
+fn find(arg: &ArgMatches, client: &Client) -> anyhow::Result<()> {
     let address = *arg.get_one::<u64>("address").unwrap();
     println!("Address: 0x{address:X}");
 
-    let resp = send_request(proto::FindRequest {
+    let resp = client.send_request(proto::FindRequest {
         records: vec![proto::FindRecord {
             id: 0,
             filter: Some(proto::Filter {
@@ -139,7 +153,7 @@ fn find(arg: &ArgMatches) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn findrange(cmd: &mut Command, arg: &ArgMatches) -> anyhow::Result<()> {
+fn findrange(cmd: &mut Command, arg: &ArgMatches, client: &Client) -> anyhow::Result<()> {
     let lower = *arg.get_one::<u64>("lower").unwrap();
     let upper = *arg.get_one::<u64>("upper").unwrap();
 
@@ -154,7 +168,7 @@ fn findrange(cmd: &mut Command, arg: &ArgMatches) -> anyhow::Result<()> {
 
     println!("Range: 0x{lower:X}-0x{upper:X}");
 
-    let resp = send_request(proto::FindRequest {
+    let resp = client.send_request(proto::FindRequest {
         records: vec![proto::FindRecord {
             id: 0,
             filter: Some(proto::Filter {
@@ -173,8 +187,8 @@ fn findrange(cmd: &mut Command, arg: &ArgMatches) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn getstat() -> anyhow::Result<()> {
-    let resp = send_request(proto::GetStatisticsRequest {})?;
+fn getstat(client: &Client) -> anyhow::Result<()> {
+    let resp = client.send_request(proto::GetStatisticsRequest {})?;
     if let Some(statistics) = resp.statistics.as_ref() {
         println!("Statistics: {:#?}", statistics);
         Ok(())
@@ -183,23 +197,36 @@ fn getstat() -> anyhow::Result<()> {
     }
 }
 
-fn resetstat() -> anyhow::Result<()> {
-    send_request(proto::ResetStatisticsRequest {})?;
+fn resetstat(client: &Client) -> anyhow::Result<()> {
+    client.send_request(proto::ResetStatisticsRequest {})?;
     println!("Done!");
     Ok(())
 }
 
 fn run(mut cmd: Command) -> anyhow::Result<()> {
-    match cmd.get_matches_mut().subcommand().unwrap() {
-        ("ping", _) => ping()?,
-        ("clear", _) => clear()?,
-        ("setcfg", sub) => setcfg(&mut cmd, sub)?,
-        ("getcfg", _) => getcfg()?,
-        ("dump", _) => dump()?,
-        ("find", sub) => find(sub)?,
-        ("findrange", sub) => findrange(&mut cmd, sub)?,
-        ("getstat", _) => getstat()?,
-        ("resetstat", _) => resetstat()?,
+    let matches = cmd.get_matches_mut();
+
+    let host = matches
+        .get_one::<String>("host")
+        .map(String::as_str)
+        .unwrap_or(&"127.0.0.1");
+    let port = matches.get_one::<u16>("port").map(|&x| x).unwrap_or(9940);
+    let endpoint = SocketAddr::V4(SocketAddrV4::new(
+        Ipv4Addr::from_str(host).map_err(|_| anyhow!("Could not parse IPv4"))?,
+        port,
+    ));
+    let client = &Client::new(endpoint);
+
+    match matches.subcommand().unwrap() {
+        ("ping", _) => ping(client)?,
+        ("clear", _) => clear(client)?,
+        ("setcfg", sub) => setcfg(&mut cmd, sub, client)?,
+        ("getcfg", _) => getcfg(client)?,
+        ("dump", _) => dump(client)?,
+        ("find", sub) => find(sub, client)?,
+        ("findrange", sub) => findrange(&mut cmd, sub, client)?,
+        ("getstat", _) => getstat(client)?,
+        ("resetstat", _) => resetstat(client)?,
         _ => unreachable!(),
     }
 
@@ -221,6 +248,8 @@ fn cli() -> Command {
         .about("Allocation catcher")
         .subcommand_required(true)
         .arg_required_else_help(true)
+        .arg(arg!(--host <host> "Host"))
+        .arg(arg!(--port <port> "Host"))
         .subcommand(Command::new("ping").about("Ping"))
         .subcommand(Command::new("getcfg").about("Get configuration"))
         .subcommand(
