@@ -1,4 +1,4 @@
-use retour::static_detour;
+use retour::GenericDetour;
 use winapi::{
     shared::{
         basetsd::SIZE_T,
@@ -15,26 +15,17 @@ use super::{
     allocation_handler, flag_set, Allocation, Base, Deallocation, DetourFlag, Error, Reallocation,
 };
 
-static_detour! {
-    static RtlAllocateHeapHook: extern "system" fn(
-        PVOID,
-        ULONG,
-        SIZE_T
-    ) -> PVOID;
+type RtlAllocateHeapFn = unsafe extern "system" fn(PVOID, ULONG, SIZE_T) -> PVOID;
+type RtlReAllocateHeapFn = unsafe extern "system" fn(PVOID, ULONG, PVOID, SIZE_T) -> PVOID;
+type RtlFreeHeapFn = unsafe extern "system" fn(PVOID, ULONG, PVOID) -> BOOL;
 
-    static RtlReAllocateHeapHook: extern "system" fn(
-        PVOID,
-        ULONG,
-        PVOID,
-        SIZE_T
-    ) -> PVOID;
-
-    static RtlFreeHeapHook: extern "system" fn(
-        PVOID,
-        ULONG,
-        PVOID
-    ) -> BOOL;
+struct Detours {
+    rtl_allocate_heap: GenericDetour<RtlAllocateHeapFn>,
+    rtl_reallocate_heap: GenericDetour<RtlReAllocateHeapFn>,
+    rtl_free_heap: GenericDetour<RtlFreeHeapFn>,
 }
+
+static mut DETOURS: Option<Detours> = None;
 
 #[inline(always)]
 fn handle_detour<T: Copy>(
@@ -82,12 +73,17 @@ macro_rules! heap_base {
 }
 
 #[allow(non_snake_case)]
-fn RtlAllocateHeapDetour(HeapHandle: PVOID, Flags: ULONG, Size: SIZE_T) -> PVOID {
+unsafe extern "system" fn RtlAllocateHeapDetour(
+    HeapHandle: PVOID,
+    Flags: ULONG,
+    Size: SIZE_T,
+) -> PVOID {
     let base = heap_base!(HeapHandle);
+    let detours = DETOURS.as_ref().unwrap();
 
     handle_detour(
         Flags,
-        |flags| RtlAllocateHeapHook.call(HeapHandle, flags, Size),
+        |flags| detours.rtl_allocate_heap.call(HeapHandle, flags, Size),
         |base_address| {
             unsafe { allocation_handler() }.on_allocation(Allocation {
                 base,
@@ -103,17 +99,22 @@ fn RtlAllocateHeapDetour(HeapHandle: PVOID, Flags: ULONG, Size: SIZE_T) -> PVOID
 }
 
 #[allow(non_snake_case)]
-fn RtlReAllocateHeapDetour(
+unsafe extern "system" fn RtlReAllocateHeapDetour(
     HeapHandle: PVOID,
     Flags: ULONG,
     BaseAddress: PVOID,
     Size: SIZE_T,
 ) -> PVOID {
     let base = heap_base!(HeapHandle);
+    let detours = DETOURS.as_ref().unwrap();
 
     handle_detour(
         Flags,
-        |flags| RtlReAllocateHeapHook.call(HeapHandle, flags, BaseAddress, Size),
+        |flags| {
+            detours
+                .rtl_reallocate_heap
+                .call(HeapHandle, flags, BaseAddress, Size)
+        },
         |base_address| {
             unsafe { allocation_handler() }.on_reallocation(Reallocation {
                 base_address: BaseAddress as usize,
@@ -132,12 +133,17 @@ fn RtlReAllocateHeapDetour(
 }
 
 #[allow(non_snake_case)]
-fn RtlFreeHeapDetour(HeapHandle: PVOID, Flags: ULONG, BaseAddress: PVOID) -> BOOL {
+unsafe extern "system" fn RtlFreeHeapDetour(
+    HeapHandle: PVOID,
+    Flags: ULONG,
+    BaseAddress: PVOID,
+) -> BOOL {
     let base = heap_base!(HeapHandle);
+    let detours = DETOURS.as_ref().unwrap();
 
     handle_detour(
         Flags,
-        |flags| RtlFreeHeapHook.call(HeapHandle, flags, BaseAddress),
+        |flags| detours.rtl_free_heap.call(HeapHandle, flags, BaseAddress),
         |success| {
             unsafe { allocation_handler() }.on_deallocation(Deallocation {
                 base,
@@ -171,42 +177,58 @@ pub unsafe fn initialize() -> Result<(), Error> {
     }
 
     // Initialize hooks
-    RtlAllocateHeapHook
-        .initialize(
-            core::mem::transmute(rtl_allocate_heap_proc),
-            RtlAllocateHeapDetour,
-        )
-        .and_then(|_| {
-            RtlReAllocateHeapHook.initialize(
-                core::mem::transmute(rtl_reallocate_heap_proc),
-                RtlReAllocateHeapDetour,
-            )
-        })
-        .and_then(|_| {
-            RtlFreeHeapHook.initialize(core::mem::transmute(rtl_free_heap_proc), RtlFreeHeapDetour)
-        })
-        .map_err(|_| Error::HookInitializeFailed)?;
+    let rtl_allocate_heap_detour = GenericDetour::<RtlAllocateHeapFn>::new(
+        core::mem::transmute(rtl_allocate_heap_proc),
+        RtlAllocateHeapDetour,
+    );
 
-    Ok(())
+    let rtl_reallocate_heap_detour = GenericDetour::<RtlReAllocateHeapFn>::new(
+        core::mem::transmute(rtl_reallocate_heap_proc),
+        RtlReAllocateHeapDetour,
+    );
+
+    let rtl_free_heap_detour = GenericDetour::<RtlFreeHeapFn>::new(
+        core::mem::transmute(rtl_free_heap_proc),
+        RtlFreeHeapDetour,
+    );
+
+    if rtl_allocate_heap_detour
+        .as_ref()
+        .and(rtl_reallocate_heap_detour.as_ref())
+        .and(rtl_free_heap_detour.as_ref())
+        .is_ok()
+    {
+        DETOURS = Some(Detours {
+            rtl_allocate_heap: rtl_allocate_heap_detour.unwrap(),
+            rtl_reallocate_heap: rtl_reallocate_heap_detour.unwrap(),
+            rtl_free_heap: rtl_free_heap_detour.unwrap(),
+        });
+        Ok(())
+    } else {
+        Err(Error::HookInitializeFailed)
+    }
 }
 
 // SAFETY: `initialize` must be called before this method is called
 pub unsafe fn enable() -> Result<(), Error> {
+    let detours = DETOURS.as_ref().unwrap();
     Ok(())
-        .and_then(|_| RtlAllocateHeapHook.enable())
-        .and_then(|_| RtlReAllocateHeapHook.enable())
-        .and_then(|_| RtlFreeHeapHook.enable())
+        .and_then(|_| detours.rtl_allocate_heap.enable())
+        .and_then(|_| detours.rtl_reallocate_heap.enable())
+        .and_then(|_| detours.rtl_free_heap.enable())
         .map_err(|_| Error::HookEnableFailed)
 }
 
 pub unsafe fn disable() -> Result<(), Error> {
+    let detours = DETOURS.as_ref().unwrap();
     Ok(())
-        .and_then(|_| RtlAllocateHeapHook.disable())
-        .and_then(|_| RtlReAllocateHeapHook.disable())
-        .and_then(|_| RtlFreeHeapHook.disable())
+        .and_then(|_| detours.rtl_allocate_heap.disable())
+        .and_then(|_| detours.rtl_reallocate_heap.disable())
+        .and_then(|_| detours.rtl_free_heap.disable())
         .map_err(|_| Error::HookDisableFailed)
 }
 
 pub unsafe fn uninitialize() -> Result<(), Error> {
+    DETOURS = None;
     Ok(())
 }

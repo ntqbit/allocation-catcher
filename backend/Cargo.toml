@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 heapless = "0.8.0"
 lazy_static = "1.4.0"
-retour = { version = "0.3.1", features = ["nightly", "static-detour"] }
+retour = "0.3.1"
 winapi = { version = "0.3.9", features = [
     "winuser",
     "libloaderapi",
